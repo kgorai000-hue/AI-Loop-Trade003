@@ -17,13 +17,9 @@ from src.strategies.grid import evaluate_grid
 
 logger = logging.getLogger(__name__)
 
-_BREAKOUT_STRATEGIES = frozenset(
-    {"momentum_breakout", "breakout", "breakout_high_vol"}
-)
-
 
 class PortfolioAgent:
-    """Route symbols via group strategies; arbitrate single vs within-group pairs."""
+    """Regime-driven singles; asset_groups kept for pair universe / tagging."""
 
     def __init__(self, config: AppConfig, store: OHLCVStore) -> None:
         self.config = config
@@ -52,8 +48,10 @@ class PortfolioAgent:
             regime = regime_map.get(symbol)
             if regime is not None and regime.selected_strategy == StrategyKind.CRISIS_HALT:
                 continue
+            if regime is not None and regime.position_scale <= 0:
+                continue
 
-            for sig in self._group_single_signals(symbol, group, regime, gate_registry):
+            for sig in self._regime_single_signals(symbol, group, regime, gate_registry):
                 if sig.strength > 0.05 and not self._duplicate(single_signals, sig):
                     single_signals.append(sig)
 
@@ -61,7 +59,15 @@ class PortfolioAgent:
             if grid_sig is not None and not self._duplicate(single_signals, grid_sig):
                 single_signals.append(grid_sig)
 
-            if self.config.ml.enabled and self._gate_allows(gate_registry, symbol, "feature_score"):
+            # ML / feature_score only when regime is uncertain-ish not used; skip on halt.
+            # Keep optional ML off regime path only if explicitly enabled and no regime halt.
+            if (
+                self.config.ml.enabled
+                and regime is not None
+                and regime.selected_strategy
+                in (StrategyKind.TREND_FOLLOWING, StrategyKind.MEAN_REVERSION)
+                and self._gate_allows(gate_registry, symbol, "feature_score")
+            ):
                 ml_sig = self.ml_agent.generate(symbol)
                 if ml_sig is not None and not self._duplicate(single_signals, ml_sig):
                     ml_sig = self._tag_single(ml_sig, group)
@@ -75,34 +81,27 @@ class PortfolioAgent:
 
         return signals
 
-    def _group_single_signals(
+    def _regime_single_signals(
         self,
         symbol: str,
         group: AssetGroupConfig | None,
         regime: RegimeAssessment | None,
         gate_registry: GateRegistry | None,
     ) -> list[TradeSignal]:
-        strategy_name = group.strategy if group is not None else "hybrid"
+        """Singles follow regime only — Group.strategy is ignored for routing."""
         out: list[TradeSignal] = []
-
-        use_trend = strategy_name in _BREAKOUT_STRATEGIES or strategy_name == "hybrid"
-        use_mr = strategy_name == "mean_reversion" or strategy_name == "hybrid"
-
-        # Group strategy overrides regime selection when asset_groups are configured.
-        if group is None:
-            selected = regime.selected_strategy if regime else StrategyKind.UNCERTAIN
-            use_trend = selected in (StrategyKind.TREND_FOLLOWING, StrategyKind.UNCERTAIN)
-            use_mr = selected in (StrategyKind.MEAN_REVERSION, StrategyKind.UNCERTAIN)
+        selected = regime.selected_strategy if regime else StrategyKind.CRISIS_HALT
+        use_trend = selected == StrategyKind.TREND_FOLLOWING
+        use_mr = selected == StrategyKind.MEAN_REVERSION
 
         if use_trend and self._gate_allows(gate_registry, symbol, "trend_following"):
-            # Pass None so group strategy is not blocked by regime selection.
-            sig = self.trend_agent.generate(symbol, None if group is not None else regime)
+            sig = self.trend_agent.generate(symbol, regime)
             if sig is not None:
                 sig = self._apply_regime_weight(sig, regime, "trend")
                 out.append(self._tag_single(sig, group))
 
         if use_mr and self._gate_allows(gate_registry, symbol, "mean_reversion"):
-            sig = self.mr_agent.generate(symbol, None if group is not None else regime)
+            sig = self.mr_agent.generate(symbol, regime)
             if sig is not None:
                 sig = self._apply_regime_weight(sig, regime, "mean_reversion")
                 out.append(self._tag_single(sig, group))
@@ -177,10 +176,7 @@ class PortfolioAgent:
         cfg = self.config.strategies
         if not cfg.grid_dry_run_only:
             return None
-        if regime is not None and regime.selected_strategy not in (
-            StrategyKind.MEAN_REVERSION,
-            StrategyKind.UNCERTAIN,
-        ):
+        if regime is not None and regime.selected_strategy != StrategyKind.MEAN_REVERSION:
             return None
 
         timeframe = self.config.stats.signal_timeframe

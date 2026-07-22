@@ -184,6 +184,17 @@ class StrategiesConfig:
     pair_zscore_entry: float
     pair_zscore_exit: float
     pair_lookback: int
+    pair_beta_window: int = 60
+    pair_beta_short_window: int = 40
+    pair_beta_long_window: int = 120
+    pair_max_half_life_bars: float = 48.0
+    pair_weaken_half_life_mult: float = 2.0
+    pair_max_beta_drift: float = 0.35
+    pair_break_beta_drift: float = 0.60
+    pair_max_abs_trend_slope: float = 0.002
+    pair_break_abs_trend_slope: float = 0.005
+    pair_min_zero_cross_rate: float = 0.05
+    pair_vol_high_mult: float = 1.5
 
 
 @dataclass
@@ -325,6 +336,25 @@ class RegimeConfig:
     adx_boundary_low: float
     adx_boundary_high: float
     post_switch_uncertain_days: int
+    # Five-state hard cutover
+    confirm_bars: int = 3
+    high_vol_trend_scale: float = 0.5
+    trend_lookback: int = 40
+    er_lookback: int = 20
+    vol_hist_window: int = 120
+    enter_trend_score: float = 0.55
+    enter_er_trend: float = 0.45
+    enter_vol_max_for_stable: float = 0.70
+    exit_trend_score: float = 0.35
+    exit_er_trend: float = 0.30
+    high_vol_enter: float = 0.70
+    stress_vol: float = 0.90
+    enter_range_abs_trend: float = 0.30
+    enter_er_range_max: float = 0.35
+    exit_range_abs_trend: float = 0.45
+    stress_corr: float = 0.85
+    stress_spread: float = 0.70
+    regime_conditioned_bt: bool = True
 
 
 @dataclass
@@ -935,7 +965,7 @@ def load_config(
             circuit_breaker_threshold=int(multi_agent_cfg.get("circuit_breaker_threshold", 3)),
         ),
         regime=RegimeConfig(
-            method=str(regime_cfg.get("method", "rule_based")),
+            method=str(regime_cfg.get("method", "five_state")),
             crisis_vol_threshold=float(regime_cfg.get("crisis_vol_threshold", 0.30)),
             crisis_correlation_threshold=float(regime_cfg.get("crisis_correlation_threshold", 0.80)),
             ranging_vol_max=float(regime_cfg.get("ranging_vol_max", 0.15)),
@@ -953,6 +983,24 @@ def load_config(
             adx_boundary_low=float(regime_cfg.get("adx_boundary_low", 22.0)),
             adx_boundary_high=float(regime_cfg.get("adx_boundary_high", 28.0)),
             post_switch_uncertain_days=int(regime_cfg.get("post_switch_uncertain_days", 2)),
+            confirm_bars=int(regime_cfg.get("confirm_bars", regime_cfg.get("confirm_days", 3))),
+            high_vol_trend_scale=float(regime_cfg.get("high_vol_trend_scale", 0.5)),
+            trend_lookback=int(regime_cfg.get("trend_lookback", 40)),
+            er_lookback=int(regime_cfg.get("er_lookback", 20)),
+            vol_hist_window=int(regime_cfg.get("vol_hist_window", 120)),
+            enter_trend_score=float(regime_cfg.get("enter_trend_score", 0.55)),
+            enter_er_trend=float(regime_cfg.get("enter_er_trend", 0.45)),
+            enter_vol_max_for_stable=float(regime_cfg.get("enter_vol_max_for_stable", 0.70)),
+            exit_trend_score=float(regime_cfg.get("exit_trend_score", 0.35)),
+            exit_er_trend=float(regime_cfg.get("exit_er_trend", 0.30)),
+            high_vol_enter=float(regime_cfg.get("high_vol_enter", 0.70)),
+            stress_vol=float(regime_cfg.get("stress_vol", 0.90)),
+            enter_range_abs_trend=float(regime_cfg.get("enter_range_abs_trend", 0.30)),
+            enter_er_range_max=float(regime_cfg.get("enter_er_range_max", 0.35)),
+            exit_range_abs_trend=float(regime_cfg.get("exit_range_abs_trend", 0.45)),
+            stress_corr=float(regime_cfg.get("stress_corr", 0.85)),
+            stress_spread=float(regime_cfg.get("stress_spread", 0.70)),
+            regime_conditioned_bt=bool(regime_cfg.get("regime_conditioned_bt", True)),
         ),
         resilience=ResilienceConfig(
             enabled=bool(resilience_cfg.get("enabled", True)),
@@ -1192,6 +1240,17 @@ def load_config(
             pair_zscore_entry=float(pair_cfg.get("zscore_entry", 2.0)),
             pair_zscore_exit=float(pair_cfg.get("zscore_exit", 0.5)),
             pair_lookback=int(pair_cfg.get("lookback", 20)),
+            pair_beta_window=int(pair_cfg.get("beta_window", 60)),
+            pair_beta_short_window=int(pair_cfg.get("beta_short_window", 40)),
+            pair_beta_long_window=int(pair_cfg.get("beta_long_window", 120)),
+            pair_max_half_life_bars=float(pair_cfg.get("max_half_life_bars", 48.0)),
+            pair_weaken_half_life_mult=float(pair_cfg.get("weaken_half_life_mult", 2.0)),
+            pair_max_beta_drift=float(pair_cfg.get("max_beta_drift", 0.35)),
+            pair_break_beta_drift=float(pair_cfg.get("break_beta_drift", 0.60)),
+            pair_max_abs_trend_slope=float(pair_cfg.get("max_abs_trend_slope", 0.002)),
+            pair_break_abs_trend_slope=float(pair_cfg.get("break_abs_trend_slope", 0.005)),
+            pair_min_zero_cross_rate=float(pair_cfg.get("min_zero_cross_rate", 0.05)),
+            pair_vol_high_mult=float(pair_cfg.get("vol_high_mult", 1.5)),
         ),
         loop_engineering=LoopEngineeringConfig(
             enabled=bool(loop_cfg.get("enabled", True)),

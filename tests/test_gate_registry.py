@@ -168,10 +168,13 @@ class PortfolioGateFilterTests(unittest.TestCase):
             regime=MarketRegime.BULL,
             annualized_volatility=0.1,
             recent_return=0.01,
-            recommended_mode=SignalMode.NONE,
+            recommended_mode=SignalMode.MOMENTUM,
             reason="test",
-            adx=20.0,
-            selected_strategy=StrategyKind.UNCERTAIN,
+            adx=30.0,
+            selected_strategy=StrategyKind.TREND_FOLLOWING,
+            regime_label="stable_trend",
+            position_scale=1.0,
+            strategy_weights={"trend": 1.0, "mean_reversion": 0.0, "defensive": 0.0},
         )
         registry = GateRegistry(
             timeframe="H1",
@@ -185,7 +188,7 @@ class PortfolioGateFilterTests(unittest.TestCase):
         signals = agent.scan(["#UK100"], {"#UK100": regime}, gate_registry=registry)
         strategies = {sig.strategy for sig in signals}
         self.assertNotIn(StrategyKind.TREND_FOLLOWING, strategies)
-        self.assertIn(StrategyKind.MEAN_REVERSION, strategies)
+        self.assertNotIn(StrategyKind.MEAN_REVERSION, strategies)
         self.assertEqual(registry.blocked_count, 1)
 
 

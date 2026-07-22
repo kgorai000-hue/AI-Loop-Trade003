@@ -26,10 +26,7 @@ class MeanReversionStrategyAgent:
         regime: RegimeAssessment | None = None,
         timeframe: str | None = None,
     ) -> TradeSignal | None:
-        if regime is not None and regime.selected_strategy not in (
-            StrategyKind.MEAN_REVERSION,
-            StrategyKind.UNCERTAIN,
-        ):
+        if regime is not None and regime.selected_strategy != StrategyKind.MEAN_REVERSION:
             return None
 
         timeframe = timeframe or self.config.stats.signal_timeframe

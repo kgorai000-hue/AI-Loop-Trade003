@@ -31,6 +31,14 @@ def symbol_to_state_key(symbol: str) -> str:
     return symbol.lstrip("#").replace("/", "_").replace("\\", "_")
 
 
+def strategy_state_key(symbol: str, strategy: str) -> str:
+    """Per-symbol per-strategy state folder (regime-conditioned optimize)."""
+    return f"{symbol_to_state_key(symbol)}__{strategy}"
+
+
+OPTIMIZE_STRATEGIES = ("trend_following", "mean_reversion")
+
+
 def llm_parameter_specs() -> list[ParameterSpec]:
     """Parameter spaces exposed to Maker (excludes profile / TF switches)."""
     return [s for s in default_parameter_specs() if s.name not in _EXCLUDED_SPEC_NAMES]

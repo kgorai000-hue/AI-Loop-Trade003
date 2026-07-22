@@ -59,7 +59,10 @@ class IntelligenceLoop:
                 state_root = intel.state_dir
             else:
                 state_root = "state"
-        self.state = StateStore(state_root, state_key or symbol)
+        from src.intelligence.params import strategy_state_key
+
+        default_key = strategy_state_key(symbol, strategy) if strategy else symbol
+        self.state = StateStore(state_root, state_key or default_key)
 
         maker_model = "claude-sonnet-4-5"
         checker_model = "claude-opus-4-8"
@@ -260,14 +263,20 @@ class IntelligenceLoop:
         self.state.update_state(**payload)
 
 
-def apply_state_overrides(config: AppConfig, symbol: str) -> AppConfig:
-    """Apply adopted STATE params for a symbol onto a cloned config."""
+def apply_state_overrides(
+    config: AppConfig,
+    symbol: str,
+    *,
+    strategy: str | None = None,
+) -> AppConfig:
+    """Apply adopted STATE params for a symbol (optionally strategy-scoped) onto config."""
     from src.backtest.loop_engine import apply_config_overrides
-    from src.intelligence.params import overrides_to_tuples
+    from src.intelligence.params import overrides_to_tuples, strategy_state_key
 
     intel = getattr(config, "intelligence", None)
     state_dir = intel.state_dir if intel is not None else "state"
-    store = StateStore(state_dir, symbol)
+    key = strategy_state_key(symbol, strategy) if strategy else symbol
+    store = StateStore(state_dir, key)
     params = store.get_params()
     if not params.overrides:
         return config

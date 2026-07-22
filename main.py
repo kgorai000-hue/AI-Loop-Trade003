@@ -140,7 +140,9 @@ def _resolve_symbols(config, symbols: list[str] | None) -> list[str]:
 
 
 def cmd_optimize(args: argparse.Namespace) -> int:
-    """Maker->Checker->Validator for one or more symbols (grid fallback without API key)."""
+    """Maker->Checker->Validator for symbols × trend/MR (regime-conditioned BT)."""
+    from src.intelligence.params import OPTIMIZE_STRATEGIES
+
     config = load_config()
     setup_logging(config.log_level)
 
@@ -149,44 +151,51 @@ def cmd_optimize(args: argparse.Namespace) -> int:
         return 1
 
     store = OHLCVStore(config.storage.path)
-    strategy = args.strategy or config.intelligence.default_strategy
     timeframe = (args.timeframe or config.trading.primary_timeframe or "M30").upper()
     symbols = _resolve_symbols(config, args.symbol)
+    strategies = (
+        [args.strategy]
+        if args.strategy
+        else list(OPTIMIZE_STRATEGIES)
+    )
 
     results = []
     exit_code = 0
     for symbol in symbols:
-        print(f"\n=== optimize {symbol} {timeframe} ({strategy}) ===")
-        loop = IntelligenceLoop(
-            config,
-            store,
-            symbol=symbol,
-            strategy=strategy,
-            timeframe=timeframe,
-        )
-        outcome = loop.run()
-        payload = {
-            "symbol": outcome.symbol,
-            "strategy": outcome.strategy,
-            "timeframe": outcome.timeframe,
-            "path": outcome.path,
-            "accepted": outcome.accepted,
-            "params": outcome.params,
-            "metrics": outcome.metrics,
-            "message": outcome.message,
-            "trials": len(outcome.trials),
-        }
-        results.append(payload)
-        print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-        if not outcome.accepted and outcome.path == "error":
-            exit_code = 1
+        for strategy in strategies:
+            print(f"\n=== optimize {symbol} {timeframe} ({strategy}) [regime-conditioned] ===")
+            loop = IntelligenceLoop(
+                config,
+                store,
+                symbol=symbol,
+                strategy=strategy,
+                timeframe=timeframe,
+            )
+            outcome = loop.run()
+            payload = {
+                "symbol": outcome.symbol,
+                "strategy": outcome.strategy,
+                "timeframe": outcome.timeframe,
+                "path": outcome.path,
+                "accepted": outcome.accepted,
+                "params": outcome.params,
+                "metrics": outcome.metrics,
+                "message": outcome.message,
+                "trials": len(outcome.trials),
+            }
+            results.append(payload)
+            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+            if not outcome.accepted and outcome.path == "error":
+                exit_code = 1
 
     if args.pairs:
         for pair in config.strategies.pairs:
             if len(pair) != 2:
                 continue
             pair_id = config.pair_state_id(pair[0], pair[1])
-            print(f"\n=== optimize pair {pair_id} ===")
+            # Pairs use mean_reversion-style params as baseline until dedicated pair BT exists
+            strategy = args.strategy or "mean_reversion"
+            print(f"\n=== optimize pair {pair_id} ({strategy}) ===")
             loop = IntelligenceLoop(
                 config,
                 store,
@@ -199,6 +208,7 @@ def cmd_optimize(args: argparse.Namespace) -> int:
             payload = {
                 "pair_id": pair_id,
                 "symbol": outcome.symbol,
+                "strategy": strategy,
                 "accepted": outcome.accepted,
                 "path": outcome.path,
                 "message": outcome.message,

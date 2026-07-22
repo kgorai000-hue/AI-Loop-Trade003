@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from src.core.types import SignalSide
+from src.pairs.spread import build_spread_snapshot
 from src.stats.returns import log_returns
 from src.strategies.trend_following import StrategySignal
 
@@ -11,20 +12,19 @@ def compute_spread_zscore(
     closes_a: np.ndarray,
     closes_b: np.ndarray,
     lookback: int,
+    *,
+    beta_window: int | None = None,
 ) -> float | None:
-    min_len = min(len(closes_a), len(closes_b))
-    if min_len < lookback + 5:
+    """Z-score of hedge spread S = log A - β log B (β from rolling OLS)."""
+    snap = build_spread_snapshot(
+        closes_a,
+        closes_b,
+        z_lookback=lookback,
+        beta_window=beta_window or max(lookback * 2, 40),
+    )
+    if snap is None:
         return None
-
-    a = closes_a[-min_len:]
-    b = closes_b[-min_len:]
-    spread = np.log(a / b)
-    window = spread[-lookback:]
-    mean = float(np.mean(window))
-    std = float(np.std(window, ddof=1))
-    if std == 0:
-        return None
-    return float((spread[-1] - mean) / std)
+    return snap.zscore
 
 
 def evaluate_pair(
@@ -35,39 +35,67 @@ def evaluate_pair(
     zscore_exit: float,
     symbol_a: str,
     symbol_b: str,
+    *,
+    beta_window: int | None = None,
+    z_entry_mult: float = 1.0,
+    size_scale: float = 1.0,
+    beta: float | None = None,
 ) -> tuple[StrategySignal | None, StrategySignal | None]:
-    z = compute_spread_zscore(closes_a, closes_b, lookback)
-    if z is None:
+    snap = build_spread_snapshot(
+        closes_a,
+        closes_b,
+        z_lookback=lookback,
+        beta_window=beta_window or max(lookback * 2, 40),
+    )
+    if snap is None or snap.zscore is None:
         return None, None
 
-    if z <= -zscore_entry:
-        strength = min(abs(z) / (zscore_entry * 2), 1.0)
+    z = snap.zscore
+    used_beta = beta if beta is not None else snap.beta
+    entry = zscore_entry * z_entry_mult
+    strength_base = min(abs(z) / (entry * 2), 1.0) * size_scale
+
+    if z <= -entry:
+        strength = max(strength_base, 0.3 * size_scale)
         leg_a = StrategySignal(
             side=SignalSide.BUY,
-            strength=max(strength, 0.3),
-            reason=f"pair long spread z={z:.2f} ({symbol_a}/{symbol_b})",
+            strength=strength,
+            reason=(
+                f"pair long spread z={z:.2f} β={used_beta:.3f} "
+                f"({symbol_a}/{symbol_b})"
+            ),
         )
         leg_b = StrategySignal(
             side=SignalSide.SELL,
-            strength=max(strength, 0.3),
-            reason=f"pair short spread z={z:.2f} ({symbol_b}/{symbol_a})",
+            strength=strength,
+            reason=(
+                f"pair short hedge z={z:.2f} β={used_beta:.3f} "
+                f"({symbol_b}/{symbol_a})"
+            ),
         )
         return leg_a, leg_b
 
-    if z >= zscore_entry:
-        strength = min(abs(z) / (zscore_entry * 2), 1.0)
+    if z >= entry:
+        strength = max(strength_base, 0.3 * size_scale)
         leg_a = StrategySignal(
             side=SignalSide.SELL,
-            strength=max(strength, 0.3),
-            reason=f"pair short spread z={z:.2f} ({symbol_a}/{symbol_b})",
+            strength=strength,
+            reason=(
+                f"pair short spread z={z:.2f} β={used_beta:.3f} "
+                f"({symbol_a}/{symbol_b})"
+            ),
         )
         leg_b = StrategySignal(
             side=SignalSide.BUY,
-            strength=max(strength, 0.3),
-            reason=f"pair long spread z={z:.2f} ({symbol_b}/{symbol_a})",
+            strength=strength,
+            reason=(
+                f"pair long hedge z={z:.2f} β={used_beta:.3f} "
+                f"({symbol_b}/{symbol_a})"
+            ),
         )
         return leg_a, leg_b
 
+    _ = zscore_exit  # reserved for exit management
     return None, None
 
 
@@ -76,31 +104,38 @@ def backtest_pair_returns(
     closes_b: np.ndarray,
     lookback: int,
     zscore_entry: float,
+    *,
+    beta_window: int | None = None,
 ) -> np.ndarray:
-    """Simplified pairs backtest: long spread when z < -entry, short when z > entry."""
+    """Pairs backtest using hedge spread residual returns approx ret_a - β ret_b."""
     min_len = min(len(closes_a), len(closes_b))
-    if min_len < lookback + 10:
+    bw = beta_window or max(lookback * 2, 40)
+    if min_len < max(lookback, bw) + 10:
         return np.array([])
 
     a = closes_a[-min_len:]
     b = closes_b[-min_len:]
     ret_a = log_returns(a)
     ret_b = log_returns(b)
-    spread = np.log(a / b)
 
     strategy = np.zeros(len(ret_a))
     position = 0.0
-    for idx in range(lookback, len(ret_a)):
-        window = spread[idx - lookback : idx]
-        std = np.std(window, ddof=1)
-        if std == 0:
-            strategy[idx - 1] = position * (ret_a[idx - 1] - ret_b[idx - 1])
+    for idx in range(max(lookback, bw), len(ret_a)):
+        snap = build_spread_snapshot(
+            a[: idx + 1],
+            b[: idx + 1],
+            z_lookback=lookback,
+            beta_window=bw,
+        )
+        if snap is None or snap.zscore is None:
+            if snap is not None:
+                strategy[idx - 1] = position * (ret_a[idx - 1] - snap.beta * ret_b[idx - 1])
             continue
-        z = (spread[idx - 1] - np.mean(window)) / std
+        z = snap.zscore
         if z <= -zscore_entry:
             position = 1.0
         elif z >= zscore_entry:
             position = -1.0
-        strategy[idx - 1] = position * (ret_a[idx - 1] - ret_b[idx - 1])
+        strategy[idx - 1] = position * (ret_a[idx - 1] - snap.beta * ret_b[idx - 1])
 
     return strategy

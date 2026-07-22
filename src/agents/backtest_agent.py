@@ -30,6 +30,8 @@ from src.core.types import MarketRegime
 from src.data.store import OHLCVStore
 from src.features.feature_vector import FeatureEngine
 from src.features.indicators import bars_to_arrays
+from src.regime.five_state import FiveStateThresholds
+from src.regime.series import build_five_state_labels, mask_signals_for_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +89,13 @@ class BacktestAgent:
         adx = np.array(series["adx"]) if series else np.zeros(len(closes))
 
         report = ValidationReport(symbol=symbol, timeframe=timeframe, cost_per_trade_pct=cost_pct)
+        labels = None
+        if self.config.regime.regime_conditioned_bt:
+            labels = self._regime_labels(closes_arr, symbol)
         for name in ("trend_following", "mean_reversion", "feature_score"):
             signals, adx_for = self._build_strategy_signals(name, closes_arr, bars, adx, regime)
+            if labels is not None and name in ("trend_following", "mean_reversion"):
+                signals = mask_signals_for_strategy(signals, labels, name)
             report.strategies.append(
                 self._validate_strategy(
                     name,
@@ -130,6 +137,12 @@ class BacktestAgent:
         signals, adx_for = self._build_strategy_signals(
             strategy_name, closes_arr, bars, adx, regime
         )
+        if self.config.regime.regime_conditioned_bt and strategy_name in (
+            "trend_following",
+            "mean_reversion",
+        ):
+            labels = self._regime_labels(closes_arr, symbol)
+            signals = mask_signals_for_strategy(signals, labels, strategy_name)
         return self._validate_strategy(
             strategy_name,
             closes_arr,
@@ -139,6 +152,37 @@ class BacktestAgent:
             len(bars),
             span_years,
             timeframe,
+        )
+
+    def _regime_labels(self, closes_arr: np.ndarray, symbol: str) -> np.ndarray:
+        cfg = self.config.regime
+        th = FiveStateThresholds(
+            enter_trend_score=cfg.enter_trend_score,
+            enter_er_trend=cfg.enter_er_trend,
+            enter_vol_max_for_stable=cfg.enter_vol_max_for_stable,
+            exit_trend_score=cfg.exit_trend_score,
+            exit_er_trend=cfg.exit_er_trend,
+            high_vol_enter=cfg.high_vol_enter,
+            stress_vol=cfg.stress_vol,
+            enter_range_abs_trend=cfg.enter_range_abs_trend,
+            enter_er_range_max=cfg.enter_er_range_max,
+            exit_range_abs_trend=cfg.exit_range_abs_trend,
+            stress_corr=cfg.stress_corr,
+            stress_spread=cfg.stress_spread,
+        )
+        corr = 0.0
+        if symbol == cfg.correlation_benchmark:
+            corr = 1.0
+        return build_five_state_labels(
+            closes_arr,
+            asset_correlation=corr,
+            trading_days=self.config.trading.trading_days_per_year,
+            vol_window=self.config.stats.vol_window,
+            trend_lookback=cfg.trend_lookback,
+            er_lookback=cfg.er_lookback,
+            vol_hist_window=cfg.vol_hist_window,
+            thresholds=th,
+            min_bars=self.config.stats.min_bars,
         )
 
     def _build_strategy_signals(

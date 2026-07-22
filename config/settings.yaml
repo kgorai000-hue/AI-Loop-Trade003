@@ -13,6 +13,8 @@ mt5:
   deviation: 50
 
 # Source of truth for the 12-symbol universe (also mirrored under symbols: for tooling).
+# Group.strategy is metadata only (not used for singles routing).
+# Groups define pair universe / lot_multiplier / tradeable flags.
 asset_groups:
   Group1:
     symbols: ["#US30", "#USSPX500", "#USNDAQ100", "#Japan225"]
@@ -206,6 +208,19 @@ strategies:
     zscore_entry: 2.0
     zscore_exit: 0.5
     lookback: 20
+    # P2: rolling hedge ratio for S = log A - β log B
+    beta_window: 60
+    beta_short_window: 40
+    beta_long_window: 120
+    # P1: R1–R5 relationship health gate
+    max_half_life_bars: 48
+    weaken_half_life_mult: 2.0
+    max_beta_drift: 0.35
+    break_beta_drift: 0.60
+    max_abs_trend_slope: 0.002
+    break_abs_trend_slope: 0.005
+    min_zero_cross_rate: 0.05
+    vol_high_mult: 1.5
   # Martingale は実装しない（Lesson 5.4 警告のみ）
 
 # Lesson 07: バックテスト検証（Look-Ahead 防止、Walk-Forward、Monte Carlo）
@@ -382,21 +397,40 @@ multi_agent:
   agent_timeout_seconds: 30
   circuit_breaker_threshold: 3
 
-# Lesson 12: 市場レジーム検出（ルールベース + 確率ウェイト + 確認遅延）
+# Five-state regime (hard cutover): A–E + uncertain drives singles; groups kept for pairs
 regime:
-  method: rule_based
+  method: five_state
+  regime_conditioned_bt: true
+  confirm_bars: 3
+  confirm_days: 3
+  high_vol_trend_scale: 0.5
+  trend_lookback: 40
+  er_lookback: 20
+  vol_hist_window: 120
+  enter_trend_score: 0.55
+  enter_er_trend: 0.45
+  enter_vol_max_for_stable: 0.70
+  exit_trend_score: 0.35
+  exit_er_trend: 0.30
+  high_vol_enter: 0.70
+  stress_vol: 0.90
+  enter_range_abs_trend: 0.30
+  enter_er_range_max: 0.35
+  exit_range_abs_trend: 0.45
+  stress_corr: 0.85
+  stress_spread: 0.70
+  correlation_benchmark: "#USSPX500"
+  correlation_lookback: 20
+  # Legacy fields retained for older helpers / tests
   crisis_vol_threshold: 0.30
   crisis_correlation_threshold: 0.80
   ranging_vol_max: 0.15
   trending_adx_min: 25
   trending_return_min: 0.05
   ranging_adx_max: 20
-  confirm_days: 3
   switch_cost_pct: 0.005
   crisis_weight_amplify: 1.5
   transition_strategy: risk_first
-  correlation_benchmark: "#USSPX500"
-  correlation_lookback: 20
   gmm_min_samples: 60
   probability_threshold: 0.5
   adx_boundary_low: 22

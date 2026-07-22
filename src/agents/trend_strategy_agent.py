@@ -27,10 +27,7 @@ class TrendStrategyAgent:
         regime: RegimeAssessment | None = None,
         timeframe: str | None = None,
     ) -> TradeSignal | None:
-        if regime is not None and regime.selected_strategy not in (
-            StrategyKind.TREND_FOLLOWING,
-            StrategyKind.UNCERTAIN,
-        ):
+        if regime is not None and regime.selected_strategy != StrategyKind.TREND_FOLLOWING:
             return None
 
         timeframe = timeframe or self.config.stats.signal_timeframe

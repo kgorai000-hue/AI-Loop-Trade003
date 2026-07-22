@@ -1,0 +1,6 @@
+# Local secrets — do not commit
+mt5:
+  path: null
+  login: null
+  password: null
+  server: "FxPro-MT5Demo"

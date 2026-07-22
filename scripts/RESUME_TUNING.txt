@@ -1,0 +1,35 @@
+MT5_loop parameter tuning — resume here (updated 2026-07-16)
+
+Protocol (screening standard)
+  timeframe: M30
+  bars: 2000
+  MC: 100
+  quality gates: OFF (screening / nogate)
+
+Adopted parameter table (single export)
+  python scripts/adopted_params.py
+  → data/reports/adopted_params_M30_<stamp>.xlsx
+  Canvas: canvases/adopted-params-m30.canvas.tsx (IDE)
+
+Adopted maps (canonical location)
+  All BEST_* maps : scripts/screening_params.py
+  Export / apply  : scripts/adopted_params.py
+    (Excel + DataFrame + apply_adopted_params)
+
+Screening with adopted MR maps
+  python scripts/run_symbol_screening.py --timeframe M30 --bars 2000 --mc-sims 100 --ignore-gates --use-best-rsi-map --use-best-bb-map
+
+Completed grids
+  signal_score : data/reports/screening_M30_2000bars_nogate_scoregrid_20260716_095141.xlsx
+  MA (short→long): data/reports/screening_M30_2000bars_nogate_magrid_20260716_102220.xlsx
+  ATR          : skipped (backtest signals do not use ATR stops)
+
+Next candidates
+  1) Commit metrics fix + tuning checkpoint
+  2) Re-evaluate candidate 3 symbols (#USSPX500, #Germany40, GOLD) with corrected metrics
+  3) Wire adopted maps into live/config (optional)
+
+Metrics fix (2026-07-17)
+  - periods_per_year now timeframe-aware (M30 = 252*48)
+  - trades/win_rate/profit_factor are round-trip based (not non-zero bars)
+  - GOLD MR 4000 recheck: data/gold_mr_4000_fixed_metrics.log

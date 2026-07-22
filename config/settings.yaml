@@ -1,0 +1,494 @@
+# AI-Loop-Trade003 — Phase 1: FxPro demo-live + asset groups + resident loop
+# Primary timeframe: M30. Symbol capacity: 12 (5 asset groups).
+
+broker:
+  name: FxPro
+  account_type: demo
+
+mt5:
+  path: null
+  timeout_ms: 60000
+  require_demo: true
+  magic: 260703
+  deviation: 50
+
+# Source of truth for the 12-symbol universe (also mirrored under symbols: for tooling).
+asset_groups:
+  Group1:
+    symbols: ["#US30", "#USSPX500", "#USNDAQ100", "#Japan225"]
+    strategy: momentum_breakout
+    description: "US & JP Indices"
+    tradeable: true
+  Group2:
+    symbols: ["#Germany40", "#UK100"]
+    strategy: hybrid
+    description: "EU Indices"
+    tradeable: true
+  Group3:
+    symbols: ["GOLD", "SILVER"]
+    strategy: breakout_high_vol
+    description: "Metals"
+    tradeable: true
+  Group4:
+    symbols: ["EURUSD", "GBPUSD", "USDJPY"]
+    strategy: mean_reversion
+    description: "FX"
+    tradeable: true
+  Group5:
+    symbols: ["WTI"]
+    strategy: breakout
+    description: "Energy"
+    tradeable: true
+    lot_multiplier: 0.5
+
+symbols:
+  indices:
+    - "#US30"
+    - "#USSPX500"
+    - "#USNDAQ100"
+    - "#Japan225"
+    - "#Germany40"
+    - "#UK100"
+  commodities:
+    - GOLD
+    - SILVER
+    - WTI
+  forex:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+
+data:
+  default_timeframe: M30
+  history_years: 1.5
+  history_bars: 9000
+  timeframes:
+    - M30
+    - M15
+    - H1
+    - H4
+    - D1
+  storage:
+    type: sqlite
+    path: data/mt5_loop.db
+  # Lesson 06: MT5 のみを唯一のデータソースとして使用（外部 API は使わない）
+  source: mt5
+  fetch:
+    max_retries: 5
+    backoff_base: 2.0
+    min_completeness_ratio: 0.9
+    chunk_size: 5000
+    range_chunk_days: 90
+  quality:
+    price_jump_threshold: 0.20
+    missing_rate_warn_pct: 5.0
+    gap_multiplier: 1.5
+    freshness_warn_seconds: 3600
+    anomaly_rate_warn_pct: 0.1
+    api_error_rate_warn_pct: 5.0
+
+# Lesson 02: 取引頻度プロファイル（low / medium / high）
+# trades_per_day を指定すればプロファイル値を上書き可能
+trading:
+  profile: medium
+  trades_per_day: null
+  trading_days_per_year: 252
+  default_lots: 0.1
+  primary_timeframe: M30
+  dry_run: false   # Phase 1: real orders on FxPro DEMO (visible in MT5 mobile)
+
+costs:
+  slippage_rate: 0.0003
+  market_impact_Y: 0.5
+  use_spread_when_slippage_unknown: true
+  # Lesson 18: trading costs and tradability
+  enabled: true
+  slippage_model: sqrt          # flat | linear | sqrt
+  slippage_k_linear: 0.3
+  slippage_k_sqrt: 1.0
+  default_adv_notional: 100000000
+  signal_decay_halflife_minutes: 120
+  execution_delay_minutes: 5
+  min_net_alpha_pct: 0.0
+  max_order_adv_ratio: 0.05
+  block_untradable: true
+  opportunity_cost_enabled: true
+
+risk:
+  max_total_exposure_pct: 60.0
+  max_single_position_pct: 10.0
+  max_symbol_exposure_pct: 20.0
+  max_sector_exposure_pct: 30.0
+  max_risk_per_trade_pct: 1.0
+  stop_loss_pct: 2.0
+  take_profit_pct: 5.0
+  trailing_stop_pct: 3.0
+  use_atr_stops: true
+  vol_stop_multiplier: 2.5
+  # Lesson 15: 3-tier drawdown control (warning / stop / circuit breaker)
+  drawdown_warning_pct: 5.0
+  drawdown_stop_pct: 10.0
+  drawdown_circuit_pct: 15.0
+  drawdown_warning_scale: 0.7
+  circuit_breaker_cooldown_days: 5
+  circuit_breaker_target_exposure_pct: 30.0
+  audit_enabled: true
+  safe_mode_on_failure: true
+
+logging:
+  level: INFO
+  file: logs/mt5_loop.log
+
+# Lesson 03: 統計分析設定
+stats:
+  analysis_timeframe: D1
+  signal_timeframe: M30
+  min_bars: 60
+  vol_window: 20
+  regime_vol_crisis: 0.40
+  regime_vol_bull_max: 0.20
+  autocorr_lags:
+    - 1
+    - 5
+  momentum_autocorr_threshold: 0.05
+  mean_reversion_autocorr_threshold: -0.05
+
+# Lesson 04: テクニカル指標（特徴量エンジニアリング）
+indicators:
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  macd_histogram_double: false
+  rsi_period: 14
+  bb_period: 20
+  bb_std: 2.0
+  atr_period: 14
+  atr_stop_multiplier: 2.0
+  divergence_lookback: 30
+  signal_score_threshold: 0.15
+  risk_free_rate: 0.04
+
+# Lesson 05: 古典的戦略パラダイム（5.5 オプションは対象外）
+strategies:
+  allocation: dynamic
+  uncertain_position_scale: 0.5
+  # Within-group pairs only (cross-group pairs are rejected at config load).
+  pairs:
+    - ["#USSPX500", "#US30"]
+    - ["#USSPX500", "#USNDAQ100"]
+    - ["#US30", "#USNDAQ100"]
+    - ["#USSPX500", "#Japan225"]
+    - ["#Germany40", "#UK100"]
+    - ["GOLD", "SILVER"]
+    - ["EURUSD", "GBPUSD"]
+    - ["EURUSD", "USDJPY"]
+    - ["GBPUSD", "USDJPY"]
+  pair_priority_strength: 0.55
+  trend:
+    ma_short: 5
+    ma_long: 20
+    adx_period: 14
+    adx_trend_threshold: 25
+    adx_sideways_threshold: 20
+    adx_confirm_days: 5
+    ma_side_days: 10
+  mean_reversion:
+    rsi_oversold: 30
+    rsi_overbought: 70
+    bb_entry_low: 0.15
+    bb_entry_high: 0.85
+  grid:
+    dry_run_only: true
+    grid_step_pct: 0.04
+    num_grids: 5
+    max_loss_pct: 5.0
+  pairs_trading:
+    zscore_entry: 2.0
+    zscore_exit: 0.5
+    lookback: 20
+  # Martingale は実装しない（Lesson 5.4 警告のみ）
+
+# Lesson 07: バックテスト検証（Look-Ahead 防止、Walk-Forward、Monte Carlo）
+backtest:
+  train_window: 200
+  test_window: 50
+  walk_forward_step: 25
+  min_walk_forward_rounds: 3
+  monte_carlo_simulations: 1000
+  cost_perturbation_pct: 0.20
+  oos_train_ratio: 0.70
+  oos_val_ratio: 0.15
+  min_oos_ratio: 0.50
+  live_decay_factor: 0.5
+  hidden_cost_pct: 0.05
+  param_sensitivity_pct: 0.20
+  param_sensitivity_max_return_change: 0.30
+  strategies_tested: 3
+  min_mc_prob_positive: 0.50
+  round_trip_cost_pct: null
+  # Block PortfolioAgent strategies that failed backtest quality gates
+  gate_filter_enabled: true
+  gate_cache_path: data/gate_registry.json
+  gate_cache_max_age_hours: 24
+
+# Loop engineering: one-parameter-at-a-time optimization (loop criteria PDF)
+loop_engineering:
+  enabled: true
+  min_trades_h1: 30
+  min_trades_m15: 50
+  min_wf_test_sharpe: 0.5
+  wf_sharpe_improvement: 0.1
+  max_mdd_pct: 20.0
+  mdd_worsen_tolerance_pct: 2.0
+  hard_stop_mdd_pct: 30.0
+  hard_stop_min_trades: 20
+  hard_stop_expected_live_pct: -5.0
+  hard_stop_mc_p5_pct: -20.0
+  hard_stop_oos_ratio: 0.30
+  overfit_is_sharpe: 3.0
+  overfit_wf_sharpe: 0.3
+  consecutive_hard_stop_limit: 5
+  tier_b_min_gate_passes: 10
+  tier_b_mc_prob_positive: 0.50
+  tier_b_mc_p5_pct: -10.0
+  tier_b_wf_positive_pct: 0.50
+  output_dir: data/loop_results
+  baseline_wf_sharpe_stop_delta: 0.2
+  stop_on_all_unstable: true
+  stop_on_all_strategies_gate_fail: true
+
+# Maker → Checker → Validator (Anthropic). Falls back to grid if no API key.
+intelligence:
+  enabled: true
+  state_dir: state
+  maker_model: claude-sonnet-4-5
+  checker_model: claude-opus-4-8
+  maker_candidates: 6
+  max_retries: 5
+  enable_prompt_cache: true
+  default_strategy: feature_score
+  loop:
+    poll_seconds: 30
+    review_weekday: 5          # 0=Mon ... 5=Sat (UTC)
+    review_hour_utc: 6
+    sharpe_degrade_trigger: 0.20
+    run_pipeline_on_bar: true
+    sync_on_poll: true
+    pretrade_optimize: true
+    require_adopted_params: true
+    optimize_pairs: true
+
+# Lesson 08: Beta 分解とヘッジ（リテールは dry-run のみ）
+hedging:
+  enabled: true
+  dry_run_only: true
+  market_benchmark: "#USSPX500"
+  hedge_instrument: "#USSPX500"
+  hedge_instrument_beta: 1.0
+  retail_borrow_rate_annual: 0.05
+  trading_cost_annual_pct: 0.01
+  target_net_beta: 0.0
+  beta_neutral_tolerance: 0.15
+  min_beta_observations: 60
+  default_symbol_beta: 1.0
+  retail_viable: false
+
+# Lesson 10: 予測→判断（DecisionAgent: Half-Kelly + Van Tharp + リスクパリティ）
+decision:
+  enabled: true
+  win_rate: 0.55
+  reward_risk_ratio: 1.5
+  risk_pct_per_trade: 0.01
+  use_risk_parity: true
+  min_confidence: 0.1
+  fallback_lots: null
+  # Optional Bayesian Kelly inputs (Lesson 15.2)
+  trade_wins: null
+  trade_losses: null
+  avg_win_pct: null
+  avg_loss_pct: null
+
+execution:
+  max_retries: 3
+  retry_backoff_seconds: 1.0
+  circuit_breaker_threshold: 5
+  # Lesson 19: execution system (simulator -> live telemetry -> calibration)
+  enabled: true
+  simulator_mode: conservative       # conservative | optimistic
+  latency_ms: 200
+  partial_fill_enabled: true
+  max_child_orders: 5
+  child_order_adv_fraction: 0.01
+  quote_max_age_seconds: 30
+  log_executions: true
+  telemetry_db_path: data/execution_telemetry.sqlite
+  slippage_conservative_multiplier: 1.5
+  use_bid_ask_not_close: true
+  slippage_threshold_pct: 0.03
+  latency_warn_ms: 500
+
+# Lesson 20: production operations (monitoring, alerts, checklists, deployment)
+ops:
+  enabled: true
+  heartbeat_timeout_seconds: 3900   # hourly batch runs (~65 min tolerance)
+  network_latency_warn_ms: 200
+  cpu_warn_pct: 80
+  memory_critical_pct: 90
+  disk_free_warn_gb: 10
+  data_disconnect_seconds: 60
+  api_success_warn_pct: 95
+  agent_latency_warn_ms: 5000
+  task_queue_warn_count: 100
+  daily_drawdown_warn_pct: 3.0
+  weekly_drawdown_critical_pct: 5.0
+  abnormal_trade_position_pct: 10.0
+  trade_frequency_deviation_x: 3.0
+  alert_suppress_seconds: 300
+  quiet_hours_enabled: true
+  quiet_hours_start: 22
+  quiet_hours_end: 7
+  structured_log_dir: logs/structured
+  model_registry_path: data/model_registry.sqlite
+  enforce_market_hours: false
+  allow_trading_in_dry_run: true
+  canary_initial_weight: 0.05
+  rollback_max_error_rate: 0.05
+  rollback_min_sharpe: 0.5
+
+# Lesson 21: project integration and graduation path
+project:
+  name: AI-Loop-Trade003
+  max_symbols: 12
+  primary_timeframe: M30
+  graduation_stage: demo_live      # backtest | paper | demo_live | small_live | scale_up
+  min_backtest_sharpe: 1.0
+  max_backtest_drawdown_pct: 20.0
+  sync_before_run: false
+
+# Appendix A: live trading log standards (order -> fill -> metrics)
+trade_log:
+  enabled: true
+  db_path: data/trade_log.sqlite
+  agent_version: ai_loop_trade003_v1
+
+# Lesson 11: マルチエージェント協調（MetaAgent、仲裁、並列分析）
+multi_agent:
+  enabled: true
+  evolution_stage: 5
+  arbitration_mode: veto
+  parallel_analysis: true
+  agent_timeout_seconds: 30
+  circuit_breaker_threshold: 3
+
+# Lesson 12: 市場レジーム検出（ルールベース + 確率ウェイト + 確認遅延）
+regime:
+  method: rule_based
+  crisis_vol_threshold: 0.30
+  crisis_correlation_threshold: 0.80
+  ranging_vol_max: 0.15
+  trending_adx_min: 25
+  trending_return_min: 0.05
+  ranging_adx_max: 20
+  confirm_days: 3
+  switch_cost_pct: 0.005
+  crisis_weight_amplify: 1.5
+  transition_strategy: risk_first
+  correlation_benchmark: "#USSPX500"
+  correlation_lookback: 20
+  gmm_min_samples: 60
+  probability_threshold: 0.5
+  adx_boundary_low: 22
+  adx_boundary_high: 28
+  post_switch_uncertain_days: 2
+
+# Lesson 13: レジーム誤判断・縮退戦略（Uncertain + Meta Agent degradation）
+resilience:
+  enabled: true
+  uncertain_prob_threshold: 0.50
+  clear_prob_threshold: 0.70
+  cautious_position_scale: 0.70
+  defensive_position_scale: 0.50
+  uncertain_position_scale: 0.50
+  uncertain_strategy: worst_case
+  max_switches_per_week: 3
+  min_regime_duration_days: 5
+  oscillation_lookback: 6
+
+# Lesson 16: ポートフォリオ構築とエクスポージャー管理
+portfolio:
+  enabled: true
+  weight_method: inverse_vol
+  shrinkage_method: ledoit_wolf
+  min_bars: 60
+  max_single_weight: 0.25
+  rebalance_threshold_pct: 5.0
+  max_notional_leverage: 3.0
+  max_risk_leverage: 2.0
+  correlation_penalty: 0.5
+  correlation_high_threshold: 0.75
+  benchmark_symbol: "#USSPX500"
+  factor_limits:
+    market_beta: 1.2
+    indices: 0.6
+    commodities: 0.5
+    forex: 0.4
+
+# Lesson 17: オンライン学習と戦略進化（Drift検出、動的閾値、ライフサイクル）
+online_learning:
+  enabled: true
+  decay_factor: 0.95
+  learning_rate: 0.01
+  min_update_interval_days: 5
+  max_update_interval_days: 20
+  psi_threshold: 0.2
+  performance_drop_threshold: 0.3
+  ic_viability_threshold: 0.03
+  default_monthly_ic_decay: 0.05
+  dynamic_threshold_k: 1.5
+  signal_threshold_default: 0.5
+  apply_dynamic_threshold: false
+  accuracy_window: 5
+  accuracy_warning_threshold: 0.5
+  min_total_bars: 120
+  lifecycle_incubation_sharpe_min: 1.0
+  lifecycle_maturity_sharpe_min: 1.5
+  lifecycle_decay_sharpe_max: 0.8
+  correlation_crisis_threshold: 0.75
+  sliding_window_days: 252
+  retrain_interval_days: 20
+
+# Lesson 14: LLM 研究レイヤー（センチメント・監査ログ・レポートのみ、実行パスには入らない）
+llm_research:
+  enabled: false
+  provider: mock
+  model: gpt-4o-mini
+  temperature: 0.0
+  news_path: data/news
+  news_file: sample_news.json
+  keyword_filter: true
+  max_news_per_run: 20
+  audit_enabled: true
+  generate_strategy_report: true
+  use_as_feature: false
+  sentiment_nudge_strength: 0.05
+  min_confidence: 0.5
+
+# Lesson 09: 教師あり学習（IC/IR 評価、パイプライン統合は ml.enabled で制御）
+ml:
+  enabled: false
+  model_type: auto
+  label_horizon_bars: 5
+  label_threshold: 0.001
+  lookback: 20
+  n_splits: 5
+  min_train_samples: 100
+  ic_threshold: 0.03
+  ir_threshold: 0.5
+  ic_degrade_ratio: 0.5
+  rolling_ic_window: 20
+  min_feature_ic: 0.01
+  max_features: 12
+  signal_probability_threshold: 0.55
+  random_forest_estimators: 100
+  random_forest_max_depth: 5
+  random_state: 42

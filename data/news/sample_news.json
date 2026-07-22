@@ -1,0 +1,37 @@
+[
+  {
+    "id": "n001",
+    "headline": "Apple beats quarterly revenue expectations",
+    "body": "Apple reported quarterly revenue of $123B, above Wall Street estimates of $118B. However iPhone sales in China declined 15% year over year amid competition.",
+    "symbols": ["#USNDAQ100"],
+    "tags": ["earnings", "AAPL"]
+  },
+  {
+    "id": "n002",
+    "headline": "S&P 500 rises on strong tech earnings",
+    "body": "The S&P 500 gained 1.2% as mega-cap tech names posted better than expected earnings. Volatility remained subdued.",
+    "symbols": ["#USSPX500"],
+    "tags": ["macro", "earnings"]
+  },
+  {
+    "id": "n003",
+    "headline": "Gold falls as dollar strengthens",
+    "body": "Gold prices dropped 0.8% after the US dollar index rose. Traders cut safe-haven demand ahead of the Fed meeting.",
+    "symbols": ["GOLD"],
+    "tags": ["macro", "commodity"]
+  },
+  {
+    "id": "n004",
+    "headline": "EURUSD weakens on ECB dovish comments",
+    "body": "EURUSD declined 0.5% after ECB officials signaled patience on rate cuts. Euro area growth data missed forecasts.",
+    "symbols": ["EURUSD"],
+    "tags": ["forex", "policy"]
+  },
+  {
+    "id": "n005",
+    "headline": "US30 drops amid growth concerns",
+    "body": "The Dow Jones fell 2.1% as manufacturing data missed expectations. Risk-off sentiment spread across indices.",
+    "symbols": ["#US30"],
+    "tags": ["macro", "risk_off"]
+  }
+]

@@ -23,6 +23,8 @@ def test_asset_groups_twelve_symbols():
     assert config.trading.dry_run is False
     assert config.project.graduation_stage == "demo_live"
     assert config.mt5.require_demo is True
+    assert len(config.tradeable_symbols_all_groups()) == 12
+    assert len(config.pairs_all_groups()) == 9
 
 
 def test_pairs_are_within_groups():

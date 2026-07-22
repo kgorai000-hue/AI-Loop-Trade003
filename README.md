@@ -72,6 +72,10 @@ powershell -ExecutionPolicy Bypass -File scripts\run_resident.ps1
 
 ペアは Group 内のみ。ペア強度が閾値以上ならペア優先、さもなければ単独。同一銘柄の同時建玉は禁止。
 
+ループエンジニアリング（起動前 optimize / 週末 review）は `check_all_asset_groups: true` により、取引サブセットに関係なく **全 Asset Group の銘柄＋グループ内ペアを毎回チェック**する。
+
+`asset_rotation` により、複数 Group の同時適用と、強いシグナル側への緩やかな資金移行（migration）の余地を持つ。完全放棄はせず `min_group_weight` で復帰余地を残す。
+
 ## Safety
 
 - デモ以外の口座ログインは起動時に拒否

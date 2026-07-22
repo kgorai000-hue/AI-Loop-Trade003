@@ -63,14 +63,44 @@ class ResidentLoopEngine:
         self.pretrade_optimize = bool(loop_cfg.pretrade_optimize)
         self.require_adopted_params = bool(loop_cfg.require_adopted_params)
         self.optimize_pairs = bool(loop_cfg.optimize_pairs)
+        self.check_all_asset_groups = bool(
+            getattr(loop_cfg, "check_all_asset_groups", True)
+        )
+
+        # Trading subset (CLI --symbol) vs full engineering universe across Asset Groups.
+        self.trade_symbols = list(self.symbols)
+        if self.check_all_asset_groups:
+            self.engineering_symbols = list(config.tradeable_symbols_all_groups())
+        else:
+            self.engineering_symbols = list(self.trade_symbols)
+        if not self.engineering_symbols:
+            self.engineering_symbols = list(self.trade_symbols)
 
         self.state_dir = config.intelligence.state_dir
-        self.stores = {sym: StateStore(self.state_dir, sym) for sym in self.symbols}
+        self.stores = {
+            sym: StateStore(self.state_dir, sym) for sym in self.engineering_symbols
+        }
+        pair_source = (
+            config.pairs_all_groups()
+            if self.check_all_asset_groups
+            else [
+                pair
+                for pair in config.strategies.pairs
+                if len(pair) == 2
+                and pair[0] in self.trade_symbols
+                and pair[1] in self.trade_symbols
+            ]
+        )
         self.pair_ids = [
             config.pair_state_id(pair[0], pair[1])
-            for pair in config.strategies.pairs
+            for pair in pair_source
             if len(pair) == 2
         ]
+        self._pair_legs = {
+            config.pair_state_id(pair[0], pair[1]): (pair[0], pair[1])
+            for pair in pair_source
+            if len(pair) == 2
+        }
         self.pair_stores = {
             pair_id: StateStore(self.state_dir, pair_id) for pair_id in self.pair_ids
         }
@@ -85,9 +115,12 @@ class ResidentLoopEngine:
         self._lock.acquire_or_exit()
         self.connector.connect()
         logger.info(
-            "ResidentLoopEngine started symbols=%s pairs=%s tf=%s poll=%ss dry_run=%s stage=%s",
-            self.symbols,
+            "ResidentLoopEngine started trade=%s engineering=%s pairs=%s "
+            "check_all_groups=%s tf=%s poll=%ss dry_run=%s stage=%s",
+            self.trade_symbols,
+            self.engineering_symbols,
             self.pair_ids,
+            self.check_all_asset_groups,
             self.timeframe,
             self.poll_seconds,
             self.config.trading.dry_run,
@@ -127,23 +160,50 @@ class ResidentLoopEngine:
                 return True
         return False
 
+    def _group_name(self, symbol: str) -> str:
+        group = self.config.group_for_symbol(symbol)
+        return group.name if group else "ungrouped"
+
+    def _strategy_for_symbol(self, symbol: str) -> str:
+        """Map Asset Group strategy to intelligence/backtest strategy name."""
+        group = self.config.group_for_symbol(symbol)
+        if group is None:
+            return self.strategy
+        name = str(group.strategy).lower()
+        if name in {"momentum_breakout", "breakout", "breakout_high_vol"}:
+            return "trend_following"
+        if name == "mean_reversion":
+            return "mean_reversion"
+        if name == "hybrid":
+            return "feature_score"
+        return self.strategy
+
     def run_pretrade_optimize(self) -> list[dict[str, Any]]:
-        """Mandatory optimize before first demo-live trade cycle."""
+        """Mandatory optimize across all Asset Groups before first demo-live trade."""
         outcomes: list[dict[str, Any]] = []
-        logger.info("Pretrade optimize starting for %d symbols", len(self.symbols))
-        for symbol in self.symbols:
+        symbols = list(self.engineering_symbols)
+        logger.info(
+            "Pretrade optimize across %d symbols in %d Asset Groups (check_all=%s)",
+            len(symbols),
+            len({self._group_name(s) for s in symbols}),
+            self.check_all_asset_groups,
+        )
+        for symbol in symbols:
+            group_id = self._group_name(symbol)
+            strategy = self._strategy_for_symbol(symbol)
             try:
                 loop = IntelligenceLoop(
                     self.config,
                     self.ohlcv,
                     symbol=symbol,
-                    strategy=self.strategy,
+                    strategy=strategy,
                     timeframe=self.timeframe,
                 )
                 outcome = loop.run()
                 outcomes.append(
                     {
                         "target": symbol,
+                        "group": group_id,
                         "kind": "single",
                         "accepted": outcome.accepted,
                         "path": outcome.path,
@@ -151,27 +211,32 @@ class ResidentLoopEngine:
                     }
                 )
                 logger.info(
-                    "Pretrade optimize %s accepted=%s path=%s",
+                    "Pretrade optimize %s [%s] accepted=%s path=%s",
                     symbol,
+                    group_id,
                     outcome.accepted,
                     outcome.path,
                 )
             except Exception as exc:
-                logger.exception("Pretrade optimize failed for %s", symbol)
+                logger.exception("Pretrade optimize failed for %s [%s]", symbol, group_id)
                 outcomes.append(
-                    {"target": symbol, "kind": "single", "accepted": False, "error": str(exc)}
+                    {
+                        "target": symbol,
+                        "group": group_id,
+                        "kind": "single",
+                        "accepted": False,
+                        "error": str(exc),
+                    }
                 )
 
         if self.optimize_pairs:
-            for pair in self.config.strategies.pairs:
-                if len(pair) != 2:
-                    continue
-                pair_id = self.config.pair_state_id(pair[0], pair[1])
+            for pair_id, (leg_a, leg_b) in self._pair_legs.items():
+                group_id = self._group_name(leg_a)
                 try:
                     loop = IntelligenceLoop(
                         self.config,
                         self.ohlcv,
-                        symbol=pair[0],
+                        symbol=leg_a,
                         strategy=self.strategy,
                         timeframe=self.timeframe,
                         state_key=pair_id,
@@ -180,26 +245,62 @@ class ResidentLoopEngine:
                     outcomes.append(
                         {
                             "target": pair_id,
+                            "group": group_id,
                             "kind": "pair",
+                            "legs": [leg_a, leg_b],
                             "accepted": outcome.accepted,
                             "path": outcome.path,
                             "message": outcome.message,
                         }
                     )
                     logger.info(
-                        "Pretrade pair optimize %s accepted=%s path=%s",
+                        "Pretrade pair optimize %s [%s] accepted=%s path=%s",
                         pair_id,
+                        group_id,
                         outcome.accepted,
                         outcome.path,
                     )
                 except Exception as exc:
-                    logger.exception("Pair optimize failed for %s", pair_id)
+                    logger.exception("Pair optimize failed for %s [%s]", pair_id, group_id)
                     outcomes.append(
-                        {"target": pair_id, "kind": "pair", "accepted": False, "error": str(exc)}
+                        {
+                            "target": pair_id,
+                            "group": group_id,
+                            "kind": "pair",
+                            "accepted": False,
+                            "error": str(exc),
+                        }
                     )
 
+        summary = self._summarize_group_checks(outcomes)
+        logger.info("Pretrade Asset Group check summary: %s", summary)
+        outcomes.append({"kind": "group_summary", "summary": summary})
         self._pretrade_ready = self._has_adopted_params()
         return outcomes
+
+    def _summarize_group_checks(self, outcomes: list[dict[str, Any]]) -> dict[str, Any]:
+        by_group: dict[str, dict[str, int]] = {}
+        for row in outcomes:
+            if row.get("kind") == "group_summary":
+                continue
+            group = str(row.get("group") or "ungrouped")
+            bucket = by_group.setdefault(
+                group, {"checked": 0, "accepted": 0, "failed": 0, "stable": 0, "optimized": 0}
+            )
+            bucket["checked"] += 1
+            if row.get("accepted"):
+                bucket["accepted"] += 1
+            if row.get("error") or (row.get("accepted") is False and row.get("ok") is False):
+                bucket["failed"] += 1
+            if row.get("optimized"):
+                bucket["optimized"] += 1
+            if row.get("skipped") or row.get("reason") == "metrics_stable":
+                bucket["stable"] += 1
+        return {
+            "groups": by_group,
+            "groups_checked": sorted(by_group.keys()),
+            "total_checked": sum(v["checked"] for v in by_group.values()),
+        }
 
     def should_review(self, now: Optional[datetime] = None) -> bool:
         now = now or datetime.now(timezone.utc)
@@ -245,7 +346,10 @@ class ResidentLoopEngine:
                 "pipeline_ok": False,
             }
 
-        store = self.stores[symbol]
+        store = self.stores.get(symbol)
+        if store is None:
+            store = StateStore(self.state_dir, symbol)
+            self.stores[symbol] = store
         latest = self._latest_bar_time(symbol)
         if not latest:
             return None
@@ -303,13 +407,17 @@ class ResidentLoopEngine:
         if self.sync_on_poll:
             try:
                 system = TradingSystem(self.config, self.connector, self.ohlcv)
-                synced = system.sync_data(self.symbols)
-                logger.debug("Synced %s bars", synced)
+                # Sync full engineering universe so cross-group checks stay fresh.
+                sync_symbols = list(
+                    dict.fromkeys([*self.engineering_symbols, *self.trade_symbols])
+                )
+                synced = system.sync_data(sync_symbols)
+                logger.debug("Synced %s bars across %s symbols", synced, len(sync_symbols))
             except Exception:
                 logger.exception("Sync failed during poll")
 
         events: list[dict[str, Any]] = []
-        for symbol in self.symbols:
+        for symbol in self.trade_symbols:
             try:
                 event = self._process_symbol_bar(symbol)
                 if event:
@@ -329,17 +437,18 @@ class ResidentLoopEngine:
 
         defaults = params_from_config(self.config)
         working = LoopParams(overrides={**defaults.overrides, **store.get_params().overrides})
+        strategy = self._strategy_for_symbol(symbol)
         validator = ParamValidator(
             self.config,
             self.ohlcv,
             symbol=symbol,
-            strategy=self.strategy,
+            strategy=strategy,
             timeframe=self.timeframe,
         )
         try:
             fresh = validator.baseline(working)
         except Exception as exc:
-            logger.warning("%s fresh baseline failed: %s", symbol, exc)
+            logger.warning("%s [%s] fresh baseline failed: %s", symbol, self._group_name(symbol), exc)
             return False
 
         cur = float(fresh.walk_forward_summary.get("avg_test_sharpe", 0.0))
@@ -347,36 +456,53 @@ class ResidentLoopEngine:
             deg = max(0.0, (float(prev) - cur) / abs(float(prev)))
             if deg >= self.sharpe_degrade_trigger:
                 logger.info(
-                    "%s degraded sharpe prev=%.3f cur=%.3f deg=%.2f",
+                    "%s [%s] degraded sharpe prev=%.3f cur=%.3f deg=%.2f",
                     symbol,
+                    self._group_name(symbol),
                     float(prev),
                     cur,
                     deg,
                 )
                 return True
         if not fresh.quality_gate.passed:
-            logger.info("%s quality gate failed on review baseline", symbol)
+            logger.info(
+                "%s [%s] quality gate failed on review baseline",
+                symbol,
+                self._group_name(symbol),
+            )
             return True
         return False
 
     def review_subloop(self) -> list[dict[str, Any]]:
+        """Check every Asset Group symbol (and pairs); optimize when degraded."""
         outcomes: list[dict[str, Any]] = []
-        for symbol in self.symbols:
-            logger.info("Review sub-loop starting for %s", symbol)
+        symbols = list(self.engineering_symbols)
+        logger.info(
+            "Review sub-loop checking %d symbols across Asset Groups %s",
+            len(symbols),
+            sorted({self._group_name(s) for s in symbols}),
+        )
+        for symbol in symbols:
+            group_id = self._group_name(symbol)
+            strategy = self._strategy_for_symbol(symbol)
+            logger.info("Review check %s [%s]", symbol, group_id)
             try:
-                if self.metrics_degraded(symbol):
-                    logger.info("%s metrics degraded -> optimizing", symbol)
+                degraded = self.metrics_degraded(symbol)
+                if degraded:
+                    logger.info("%s [%s] metrics degraded -> optimizing", symbol, group_id)
                     loop = IntelligenceLoop(
                         self.config,
                         self.ohlcv,
                         symbol=symbol,
-                        strategy=self.strategy,
+                        strategy=strategy,
                         timeframe=self.timeframe,
                     )
                     outcome = loop.run()
                     outcomes.append(
                         {
                             "symbol": symbol,
+                            "group": group_id,
+                            "kind": "single",
                             "ok": True,
                             "optimized": True,
                             "accepted": outcome.accepted,
@@ -387,19 +513,91 @@ class ResidentLoopEngine:
                         }
                     )
                 else:
-                    logger.info("%s metrics stable -> skip optimize", symbol)
+                    logger.info("%s [%s] metrics stable -> checked, skip optimize", symbol, group_id)
                     outcomes.append(
                         {
                             "symbol": symbol,
+                            "group": group_id,
+                            "kind": "single",
                             "ok": True,
                             "optimized": False,
                             "skipped": True,
                             "reason": "metrics_stable",
+                            "accepted": True,
                         }
                     )
             except Exception as exc:
-                logger.exception("Review failed for %s", symbol)
-                outcomes.append({"symbol": symbol, "ok": False, "error": str(exc)})
+                logger.exception("Review failed for %s [%s]", symbol, group_id)
+                outcomes.append(
+                    {
+                        "symbol": symbol,
+                        "group": group_id,
+                        "kind": "single",
+                        "ok": False,
+                        "accepted": False,
+                        "error": str(exc),
+                    }
+                )
+
+        if self.optimize_pairs:
+            for pair_id, (leg_a, leg_b) in self._pair_legs.items():
+                group_id = self._group_name(leg_a)
+                logger.info("Review pair check %s [%s]", pair_id, group_id)
+                try:
+                    # Use first leg degradation as proxy for pair review.
+                    if self.metrics_degraded(leg_a) or self.metrics_degraded(leg_b):
+                        loop = IntelligenceLoop(
+                            self.config,
+                            self.ohlcv,
+                            symbol=leg_a,
+                            strategy=self.strategy,
+                            timeframe=self.timeframe,
+                            state_key=pair_id,
+                        )
+                        outcome = loop.run()
+                        outcomes.append(
+                            {
+                                "symbol": pair_id,
+                                "group": group_id,
+                                "kind": "pair",
+                                "legs": [leg_a, leg_b],
+                                "ok": True,
+                                "optimized": True,
+                                "accepted": outcome.accepted,
+                                "path": outcome.path,
+                                "message": outcome.message,
+                            }
+                        )
+                    else:
+                        outcomes.append(
+                            {
+                                "symbol": pair_id,
+                                "group": group_id,
+                                "kind": "pair",
+                                "legs": [leg_a, leg_b],
+                                "ok": True,
+                                "optimized": False,
+                                "skipped": True,
+                                "reason": "metrics_stable",
+                                "accepted": True,
+                            }
+                        )
+                except Exception as exc:
+                    logger.exception("Review pair failed for %s [%s]", pair_id, group_id)
+                    outcomes.append(
+                        {
+                            "symbol": pair_id,
+                            "group": group_id,
+                            "kind": "pair",
+                            "ok": False,
+                            "accepted": False,
+                            "error": str(exc),
+                        }
+                    )
+
+        summary = self._summarize_group_checks(outcomes)
+        logger.info("Review Asset Group check summary: %s", summary)
+        outcomes.append({"kind": "group_summary", "ok": True, "summary": summary})
 
         day_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self._persist_last_review_date(day_key)

@@ -48,6 +48,7 @@ from src.llm_research.types import LLMResearchReport
 from src.online.types import EvolutionReport
 from src.ops.types import OpsReport
 from src.portfolio.types import PortfolioReport
+from src.portfolio.asset_rotation import resolve_scan_symbols
 from src.risk.types import RiskControlReport
 from src.data.store import OHLCVStore
 from src.execution.costs.types import CostPipelineReport
@@ -156,7 +157,9 @@ class MetaAgent:
         return self._safe_call("BacktestAgent", _build, default=None)
 
     def run(self, symbols: list[str] | None = None) -> PipelineResult:
-        symbols = symbols or self.config.symbols
+        # Expand to all Asset Groups when multi-asset rotation room is enabled,
+        # so other groups can receive signals and migrate in concurrently.
+        symbols = resolve_scan_symbols(self.config, symbols)
         result = PipelineResult()
         arbitration_notes: list[ArbitrationResult] = []
         parallel_start = time.perf_counter()

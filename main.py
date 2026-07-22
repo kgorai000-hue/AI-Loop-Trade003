@@ -135,7 +135,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 def _resolve_symbols(config, symbols: list[str] | None) -> list[str]:
     if symbols:
         return symbols
-    return list(config.symbols)
+    # Default optimize/review universe: every tradeable Asset Group member.
+    return list(config.tradeable_symbols_all_groups() or config.symbols)
 
 
 def cmd_optimize(args: argparse.Namespace) -> int:
@@ -288,7 +289,11 @@ def main() -> int:
         "optimize",
         help="Maker->Checker->Validator param update (grid fallback if no API key)",
     )
-    opt_p.add_argument("--symbol", action="append", help="Symbol(s); default=all configured")
+    opt_p.add_argument(
+        "--symbol",
+        action="append",
+        help="Symbol(s); default=all Asset Groups (tradeable universe)",
+    )
     opt_p.add_argument("--strategy", default=None, help="Backtest strategy name")
     opt_p.add_argument("--timeframe", default="M30", help="Timeframe (default M30)")
     opt_p.add_argument("--pairs", action="store_true", help="Also optimize within-group pairs")

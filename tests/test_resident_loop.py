@@ -17,6 +17,22 @@ def test_intelligence_loop_config_loaded():
     assert config.intelligence.loop.poll_seconds == 30
     assert config.intelligence.loop.review_weekday == 5
     assert config.intelligence.loop.sync_on_poll is True
+    assert config.intelligence.loop.check_all_asset_groups is True
+
+
+def test_engineering_universe_covers_all_asset_groups():
+    config = load_config()
+    engine = ResidentLoopEngine(config)
+    assert set(engine.engineering_symbols) == set(config.tradeable_symbols_all_groups())
+    assert len(engine.engineering_symbols) == 12
+    groups = {engine._group_name(s) for s in engine.engineering_symbols}
+    assert groups == {"Group1", "Group2", "Group3", "Group4", "Group5"}
+    # CLI trade subset must not shrink engineering when check_all_asset_groups=True
+    engine_subset = ResidentLoopEngine(config, symbols=["GOLD", "SILVER"])
+    assert set(engine_subset.trade_symbols) == {"GOLD", "SILVER"}
+    assert len(engine_subset.engineering_symbols) == 12
+    assert "EURUSD" in engine_subset.engineering_symbols
+    assert "WTI" in engine_subset.engineering_symbols
 
 
 def test_should_review_persisted_across_restart(tmp_path: Path, monkeypatch):
@@ -28,6 +44,9 @@ def test_should_review_persisted_across_restart(tmp_path: Path, monkeypatch):
     engine = ResidentLoopEngine.__new__(ResidentLoopEngine)
     engine.config = config
     engine.symbols = ["#US30"]
+    engine.trade_symbols = ["#US30"]
+    engine.engineering_symbols = ["#US30"]
+    engine.check_all_asset_groups = False
     engine.strategy = "feature_score"
     engine.timeframe = "M30"
     engine.poll_seconds = 30
@@ -43,6 +62,7 @@ def test_should_review_persisted_across_restart(tmp_path: Path, monkeypatch):
     engine.stores = {"#US30": StateStore(tmp_path, "#US30")}
     engine.pair_stores = {}
     engine.pair_ids = []
+    engine._pair_legs = {}
     engine._last_review_date = engine._load_last_review_date()
     engine.connector = MagicMock()
     engine.ohlcv = MagicMock()
@@ -58,6 +78,7 @@ def test_should_review_persisted_across_restart(tmp_path: Path, monkeypatch):
     engine2 = ResidentLoopEngine.__new__(ResidentLoopEngine)
     engine2.config = config
     engine2.symbols = ["#US30"]
+    engine2.engineering_symbols = ["#US30"]
     engine2.review_weekday = 5
     engine2.review_hour_utc = 6
     engine2.stores = {"#US30": StateStore(tmp_path, "#US30")}

@@ -277,6 +277,8 @@ intelligence:
     pretrade_optimize: true
     require_adopted_params: true
     optimize_pairs: true
+    # Every loop-engineering pass checks ALL Asset Groups (not only the active trade subset).
+    check_all_asset_groups: true
 
 # Lesson 08: Beta 分解とヘッジ（リテールは dry-run のみ）
 hedging:
@@ -432,6 +434,20 @@ portfolio:
     indices: 0.6
     commodities: 0.5
     forex: 0.4
+
+# Multi Asset-Group concurrency + gradual migration (room to shift capital).
+asset_rotation:
+  enabled: true
+  multi_group_enabled: true          # multiple groups may apply at once
+  max_active_groups: 5
+  max_symbols_concurrent: 8          # simultaneous new-entry budget
+  migration_enabled: true            # gradually reweight toward stronger groups
+  min_group_weight: 0.05             # never fully abandon a tradeable group
+  max_group_weight: 0.50
+  migration_shift_threshold: 0.08    # log migration when weight moves by this much
+  strength_power: 1.0
+  expand_scan_to_all_groups: true    # scan all groups so migration targets can appear
+  state_key: asset_rotation
 
 # Lesson 17: オンライン学習と戦略進化（Drift検出、動的閾値、ライフサイクル）
 online_learning:

@@ -12,3 +12,8 @@ data/*.db-journal
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Runtime loop state (adopted params, rotation)
+state/*/
+!state/.gitkeep
+

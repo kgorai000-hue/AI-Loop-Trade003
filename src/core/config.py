@@ -279,6 +279,7 @@ class ResidentLoopConfig:
     pretrade_optimize: bool = True
     require_adopted_params: bool = True
     optimize_pairs: bool = True
+    check_all_asset_groups: bool = True
 
 
 @dataclass
@@ -365,6 +366,23 @@ class PortfolioConfig:
     correlation_high_threshold: float
     factor_limits: dict[str, float]
     benchmark_symbol: str
+
+
+@dataclass
+class AssetRotationConfig:
+    """Room for multi-group concurrency and gradual migration across Asset Groups."""
+
+    enabled: bool = True
+    multi_group_enabled: bool = True
+    max_active_groups: int = 5
+    max_symbols_concurrent: int = 8
+    migration_enabled: bool = True
+    min_group_weight: float = 0.05
+    max_group_weight: float = 0.50
+    migration_shift_threshold: float = 0.08
+    strength_power: float = 1.0
+    expand_scan_to_all_groups: bool = True
+    state_key: str = "asset_rotation"
 
 
 @dataclass
@@ -507,6 +525,7 @@ class AppConfig:
     regime: RegimeConfig
     resilience: ResilienceConfig
     portfolio: PortfolioConfig
+    asset_rotation: AssetRotationConfig
     online_learning: OnlineLearningConfig
     llm_research: LLMResearchConfig
     ml: MLConfig
@@ -549,6 +568,32 @@ class AppConfig:
 
     def pair_state_id(self, symbol_a: str, symbol_b: str) -> str:
         return f"pairs/{symbol_a}__{symbol_b}"
+
+    def tradeable_symbols_all_groups(self) -> list[str]:
+        """All tradeable symbols across every Asset Group (engineering universe)."""
+        if not self.asset_groups:
+            return list(self.symbols)
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for group in self.asset_groups.values():
+            if not group.tradeable:
+                continue
+            for symbol in group.symbols:
+                if symbol not in seen:
+                    ordered.append(symbol)
+                    seen.add(symbol)
+        return ordered
+
+    def pairs_all_groups(self) -> list[list[str]]:
+        """Within-group pairs whose both legs are tradeable."""
+        tradeable = set(self.tradeable_symbols_all_groups())
+        out: list[list[str]] = []
+        for pair in self.strategies.pairs:
+            if len(pair) != 2:
+                continue
+            if pair[0] in tradeable and pair[1] in tradeable:
+                out.append(list(pair))
+        return out
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -719,6 +764,7 @@ def load_config(
     regime_cfg = config_data.get("regime", {})
     resilience_cfg = config_data.get("resilience", {})
     portfolio_cfg = config_data.get("portfolio", {})
+    rotation_cfg = config_data.get("asset_rotation", {})
     online_cfg = config_data.get("online_learning", {})
     llm_cfg = config_data.get("llm_research", {})
     ml_cfg = config_data.get("ml", {})
@@ -936,6 +982,23 @@ def load_config(
                 for k, v in (portfolio_cfg.get("factor_limits") or {}).items()
             },
             benchmark_symbol=str(portfolio_cfg.get("benchmark_symbol", "#USSPX500")),
+        ),
+        asset_rotation=AssetRotationConfig(
+            enabled=bool(rotation_cfg.get("enabled", True)),
+            multi_group_enabled=bool(rotation_cfg.get("multi_group_enabled", True)),
+            max_active_groups=int(rotation_cfg.get("max_active_groups", 5)),
+            max_symbols_concurrent=int(rotation_cfg.get("max_symbols_concurrent", 8)),
+            migration_enabled=bool(rotation_cfg.get("migration_enabled", True)),
+            min_group_weight=float(rotation_cfg.get("min_group_weight", 0.05)),
+            max_group_weight=float(rotation_cfg.get("max_group_weight", 0.50)),
+            migration_shift_threshold=float(
+                rotation_cfg.get("migration_shift_threshold", 0.08)
+            ),
+            strength_power=float(rotation_cfg.get("strength_power", 1.0)),
+            expand_scan_to_all_groups=bool(
+                rotation_cfg.get("expand_scan_to_all_groups", True)
+            ),
+            state_key=str(rotation_cfg.get("state_key", "asset_rotation")),
         ),
         online_learning=OnlineLearningConfig(
             enabled=bool(online_cfg.get("enabled", True)),
@@ -1180,6 +1243,9 @@ def load_config(
                     intel_loop_cfg.get("require_adopted_params", True)
                 ),
                 optimize_pairs=bool(intel_loop_cfg.get("optimize_pairs", True)),
+                check_all_asset_groups=bool(
+                    intel_loop_cfg.get("check_all_asset_groups", True)
+                ),
             ),
         ),
         log_level=str(logging_cfg.get("level", "INFO")),

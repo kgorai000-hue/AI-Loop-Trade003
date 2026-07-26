@@ -291,6 +291,10 @@ class ResidentLoopConfig:
     require_adopted_params: bool = True
     optimize_pairs: bool = True
     check_all_asset_groups: bool = True
+    # When no valid Anthropic key: seed settings.yaml defaults (skip multi-hour grid).
+    no_api_seed_baseline: bool = True
+    # When grid finds no improvement: still seed defaults so demo loop can trade.
+    seed_baseline_if_no_adopt: bool = True
 
 
 @dataclass
@@ -1304,6 +1308,12 @@ def load_config(
                 optimize_pairs=bool(intel_loop_cfg.get("optimize_pairs", True)),
                 check_all_asset_groups=bool(
                     intel_loop_cfg.get("check_all_asset_groups", True)
+                ),
+                no_api_seed_baseline=bool(
+                    intel_loop_cfg.get("no_api_seed_baseline", True)
+                ),
+                seed_baseline_if_no_adopt=bool(
+                    intel_loop_cfg.get("seed_baseline_if_no_adopt", True)
                 ),
             ),
         ),

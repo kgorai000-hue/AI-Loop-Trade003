@@ -143,9 +143,15 @@ class ResidentLoopEngine:
             self.config.trading.dry_run,
             self.config.project.graduation_stage,
         )
-        if self.pretrade_optimize:
-            self.run_pretrade_optimize()
         self._pretrade_ready = self._has_adopted_params()
+        if self.pretrade_optimize:
+            if self._pretrade_ready:
+                logger.info(
+                    "Adopted/seeded params already present — skipping pretrade optimize"
+                )
+            else:
+                self.run_pretrade_optimize()
+                self._pretrade_ready = self._has_adopted_params()
         if self.require_adopted_params and not self._pretrade_ready:
             logger.warning(
                 "No adopted params yet; pipeline will wait until optimize succeeds"

@@ -18,6 +18,28 @@ def test_intelligence_loop_config_loaded():
     assert config.intelligence.loop.review_weekday == 5
     assert config.intelligence.loop.sync_on_poll is True
     assert config.intelligence.loop.check_all_asset_groups is True
+    assert config.intelligence.loop.no_api_seed_baseline is True
+    assert config.intelligence.loop.seed_baseline_if_no_adopt is True
+
+
+def test_has_adopted_params_accepts_seeded_overrides(tmp_path: Path, monkeypatch):
+    config = load_config()
+    monkeypatch.setattr(config.intelligence, "state_dir", str(tmp_path))
+    engine = ResidentLoopEngine(config, symbols=["GOLD"])
+    # Only engineer GOLD for this unit check.
+    engine.engineering_symbols = ["GOLD"]
+    key_tf = "GOLD__trend_following"
+    store = StateStore(tmp_path, key_tf)
+    store.update_state(
+        params={"indicators.signal_score_threshold": 0.15},
+        accepted=True,
+        path="baseline_seed",
+    )
+    engine.stores = {
+        key_tf: store,
+        "GOLD__mean_reversion": StateStore(tmp_path, "GOLD__mean_reversion"),
+    }
+    assert engine._has_adopted_params() is True
 
 
 def test_engineering_universe_covers_all_asset_groups():

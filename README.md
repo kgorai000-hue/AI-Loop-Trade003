@@ -46,6 +46,8 @@ python main.py status
 python main.py optimize --pairs
 ```
 
+Anthropic API キーが無い／無効な場合は **settings.yaml のデフォルトを seed** してすぐ終わります（数分）。有効なキーがあるときだけ Maker→Checker→Validator→grid が走ります。
+
 5. 常駐ループ（デモ実注文）:
 
 ```bash

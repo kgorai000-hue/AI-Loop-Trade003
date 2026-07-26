@@ -272,7 +272,8 @@ loop_engineering:
   stop_on_all_unstable: true
   stop_on_all_strategies_gate_fail: true
 
-# Maker → Checker → Validator (Anthropic). Falls back to grid if no API key.
+# Maker → Checker → Validator (Anthropic).
+# No / invalid API key → seed settings.yaml defaults (demo can run without LLM).
 intelligence:
   enabled: true
   state_dir: state
@@ -294,6 +295,10 @@ intelligence:
     optimize_pairs: true
     # Every loop-engineering pass checks ALL Asset Groups (not only the active trade subset).
     check_all_asset_groups: true
+    # Demo without Anthropic: seed config defaults instead of multi-hour grid.
+    no_api_seed_baseline: true
+    # After grid finds no improvement, still seed defaults so resident loop can trade.
+    seed_baseline_if_no_adopt: true
 
 # Lesson 08: Beta 分解とヘッジ（リテールは dry-run のみ）
 hedging:

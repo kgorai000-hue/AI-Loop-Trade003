@@ -16,7 +16,7 @@ from src.intelligence.grid import run_grid_search
 from src.intelligence.maker import StrategyMaker
 from src.intelligence.params import LoopParams, params_from_config
 from src.intelligence.persistence import StateStore
-from src.intelligence.validator import ParamValidator
+from src.intelligence.validator import ParamValidator, _metrics_from_result
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,13 @@ class IntelligenceLoop:
             strategy=strategy,
             timeframe=self.timeframe,
         )
+        loop_cfg = getattr(intel, "loop", None) if intel is not None else None
+        self.no_api_seed_baseline = bool(
+            getattr(loop_cfg, "no_api_seed_baseline", True)
+        )
+        self.seed_baseline_if_no_adopt = bool(
+            getattr(loop_cfg, "seed_baseline_if_no_adopt", True)
+        )
 
     def run(self) -> IntelligenceOutcome:
         defaults = params_from_config(self.config)
@@ -99,11 +106,30 @@ class IntelligenceLoop:
         state = self.state.read_state()
         last_metrics = state.get("last_metrics") or {}
 
+        # Demo path: no valid Anthropic key → seed settings defaults (seconds, not hours).
+        if not self.client.available() and self.no_api_seed_baseline:
+            logger.info(
+                "No valid ANTHROPIC_API_KEY — seeding config defaults for %s (%s)",
+                self.symbol,
+                self.strategy,
+            )
+            return self._seed_baseline(
+                working,
+                metrics={},
+                message="seeded config defaults (no valid API key)",
+            )
+
         try:
             baseline = self.validator.baseline(working)
         except Exception as exc:
             msg = f"baseline validation failed: {exc}"
             logger.error(msg)
+            if self.seed_baseline_if_no_adopt:
+                return self._seed_baseline(
+                    working,
+                    metrics={},
+                    message=f"seeded config defaults after baseline error: {exc}",
+                )
             return IntelligenceOutcome(
                 symbol=self.symbol,
                 strategy=self.strategy,
@@ -226,18 +252,63 @@ class IntelligenceLoop:
         if accepted:
             self._persist(best, metrics, path="grid", accepted=True)
             message = "adopted via grid fallback"
-        else:
-            self._persist(working, {}, path="grid", accepted=False)
-            message = "grid found no improvement"
+            return IntelligenceOutcome(
+                symbol=self.symbol,
+                strategy=self.strategy,
+                timeframe=self.timeframe,
+                path="grid" if not self.client.available() else "grid_fallback",
+                accepted=True,
+                params=best.as_dict(),
+                metrics=metrics,
+                trials=trials,
+                message=message,
+            )
+
+        if self.seed_baseline_if_no_adopt:
+            baseline_metrics: dict[str, Any] = {}
+            try:
+                baseline_metrics = _metrics_from_result(baseline)
+            except Exception:
+                baseline_metrics = {}
+            seeded = self._seed_baseline(
+                working,
+                metrics=baseline_metrics,
+                message="seeded config defaults (grid found no improvement)",
+                trials=trials,
+            )
+            return seeded
+
+        self._persist(working, {}, path="grid", accepted=False)
         return IntelligenceOutcome(
             symbol=self.symbol,
             strategy=self.strategy,
             timeframe=self.timeframe,
             path="grid" if not self.client.available() else "grid_fallback",
-            accepted=accepted,
-            params=best.as_dict() if accepted else working.as_dict(),
-            metrics=metrics if accepted else {},
+            accepted=False,
+            params=working.as_dict(),
+            metrics={},
             trials=trials,
+            message="grid found no improvement",
+        )
+
+    def _seed_baseline(
+        self,
+        working: LoopParams,
+        *,
+        metrics: dict[str, Any],
+        message: str,
+        trials: list[dict[str, Any]] | None = None,
+    ) -> IntelligenceOutcome:
+        self._persist(working, metrics, path="baseline_seed", accepted=True)
+        return IntelligenceOutcome(
+            symbol=self.symbol,
+            strategy=self.strategy,
+            timeframe=self.timeframe,
+            path="baseline_seed",
+            accepted=True,
+            params=working.as_dict(),
+            metrics=metrics,
+            trials=list(trials or []),
             message=message,
         )
 

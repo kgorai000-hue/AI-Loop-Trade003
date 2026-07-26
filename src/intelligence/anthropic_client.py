@@ -35,15 +35,29 @@ class AnthropicClient:
         self.max_delay_sec = float(max_delay_sec)
         self._client = None
 
+    @staticmethod
+    def looks_like_api_key(api_key: str | None) -> bool:
+        """True only for a non-placeholder Anthropic key shape."""
+        key = (api_key or "").strip()
+        if not key:
+            return False
+        if "..." in key:
+            return False
+        if not key.startswith("sk-ant-"):
+            return False
+        return len(key) >= 20
+
     def available(self) -> bool:
-        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+        return self.looks_like_api_key(os.environ.get("ANTHROPIC_API_KEY"))
 
     def _get_client(self):
         if self._client is not None:
             return self._client
         api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise AnthropicClientError("ANTHROPIC_API_KEY is not set")
+        if not self.looks_like_api_key(api_key):
+            raise AnthropicClientError(
+                "ANTHROPIC_API_KEY is missing or looks like a placeholder"
+            )
         try:
             import anthropic
         except ImportError as exc:

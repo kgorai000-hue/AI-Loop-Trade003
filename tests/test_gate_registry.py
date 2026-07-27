@@ -126,6 +126,22 @@ class GateRegistryTests(unittest.TestCase):
         self.assertFalse(merged.allows("EURUSD", "trend_following"))
         self.assertTrue(merged.allows("USDJPY", "trend_following"))
 
+    def test_load_or_build_skips_rebuild_when_build_on_miss_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missing_gate.json"
+            registry, from_cache = load_or_build_gate_registry(
+                MagicMock(),
+                MagicMock(),
+                ["GOLD"],
+                "M30",
+                str(path),
+                24.0,
+                build_on_miss=False,
+            )
+            self.assertFalse(from_cache)
+            self.assertEqual(registry.entries, {})
+            self.assertTrue(registry.allows("GOLD", "trend_following"))
+
     def test_build_gate_registry_skips_value_errors(self) -> None:
         backtest = MagicMock()
         backtest.validate_symbol.side_effect = [

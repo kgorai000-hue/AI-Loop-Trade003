@@ -245,6 +245,9 @@ backtest:
   gate_filter_enabled: true
   gate_cache_path: data/gate_registry.json
   gate_cache_max_age_hours: 24
+  # Demo-live default: do NOT rebuild gate registry on cache miss (multi-hour BT).
+  # Pre-build with scripts or set true when you want strict filtering.
+  gate_build_on_miss: false
 
 # Loop engineering: one-parameter-at-a-time optimization (loop criteria PDF)
 loop_engineering:

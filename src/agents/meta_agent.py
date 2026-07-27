@@ -150,6 +150,7 @@ class MetaAgent:
                 timeframe,
                 bt.gate_cache_path,
                 bt.gate_cache_max_age_hours,
+                build_on_miss=bool(getattr(bt, "gate_build_on_miss", False)),
             )
             self._gate_from_cache = from_cache
             return registry

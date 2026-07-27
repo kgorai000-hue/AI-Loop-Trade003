@@ -509,6 +509,8 @@ class BacktestConfig:
     gate_filter_enabled: bool
     gate_cache_path: str
     gate_cache_max_age_hours: float
+    # When cache is missing/stale: True = rebuild (hours), False = allow-all (demo-friendly).
+    gate_build_on_miss: bool = False
 
 
 @dataclass
@@ -902,6 +904,7 @@ def load_config(
             gate_filter_enabled=bool(backtest_cfg.get("gate_filter_enabled", True)),
             gate_cache_path=str(backtest_cfg.get("gate_cache_path", "data/gate_registry.json")),
             gate_cache_max_age_hours=float(backtest_cfg.get("gate_cache_max_age_hours", 24.0)),
+            gate_build_on_miss=bool(backtest_cfg.get("gate_build_on_miss", False)),
         ),
         hedging=HedgingConfig(
             enabled=bool(hedging_cfg.get("enabled", True)),

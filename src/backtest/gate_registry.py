@@ -155,8 +155,16 @@ def build_gate_registry(
     timeframe: str,
 ) -> GateRegistry:
     reports: list[ValidationReport] = []
-    for symbol in symbols:
+    total = len(symbols)
+    for idx, symbol in enumerate(symbols, start=1):
         try:
+            logger.info(
+                "GateRegistry build %d/%d: validating %s %s",
+                idx,
+                total,
+                symbol,
+                timeframe,
+            )
             regime = regime_agent.assess(symbol)
             market_regime = regime.regime if regime else None
             reports.append(backtest_agent.validate_symbol(symbol, timeframe, market_regime))
@@ -172,11 +180,29 @@ def load_or_build_gate_registry(
     timeframe: str,
     cache_path: str,
     max_age_hours: float,
+    *,
+    build_on_miss: bool = True,
 ) -> tuple[GateRegistry, bool]:
     cached = GateRegistry.load(cache_path, timeframe)
     if cached is not None and cached.is_fresh(max_age_hours) and cached.entries:
         return cached, True
 
+    if not build_on_miss:
+        logger.warning(
+            "GateRegistry cache miss/stale (path=%s) — allowing all strategies "
+            "(gate_build_on_miss=false). Pre-build cache to enable filtering.",
+            cache_path,
+        )
+        return (
+            GateRegistry(timeframe=timeframe, entries={}, updated_at=int(time.time())),
+            False,
+        )
+
+    logger.info(
+        "GateRegistry cache miss/stale — building for %d symbol(s) on %s",
+        len(symbols),
+        timeframe,
+    )
     registry = build_gate_registry(backtest_agent, regime_agent, symbols, timeframe)
     if registry.entries:
         registry.save(cache_path)

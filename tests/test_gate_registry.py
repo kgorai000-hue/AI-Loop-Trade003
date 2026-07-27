@@ -9,7 +9,12 @@ from unittest.mock import MagicMock
 
 from src.agents.backtest_agent import StrategyValidationResult, ValidationReport
 from src.agents.portfolio_agent import PortfolioAgent
-from src.backtest.gate_registry import GateEntry, GateRegistry, build_gate_registry
+from src.backtest.gate_registry import (
+    GateEntry,
+    GateRegistry,
+    build_gate_registry,
+    load_or_build_gate_registry,
+)
 from src.backtest.types import BacktestResult, QualityGateCheck, QualityGateReport
 from src.core.config import load_config
 from src.core.types import MarketRegime, RegimeAssessment, SignalMode, SignalSide, StrategyKind, TradeSignal

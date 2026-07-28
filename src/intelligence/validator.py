@@ -27,7 +27,7 @@ class ValidationOutcome:
 
 
 class ParamValidator:
-    """Mathematical validator using Trade002 backtest quality gates."""
+    """Mathematical validator using Trade003 backtest quality gates."""
 
     def __init__(
         self,

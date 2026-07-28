@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -39,11 +40,21 @@ def _atomic_write_text(path: Path, content: str) -> None:
         handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(tmp, path)
+    # Windows may briefly lock the destination during antivirus / parallel tests.
+    last_exc: OSError | None = None
+    for attempt in range(8):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as exc:
+            last_exc = exc
+            time.sleep(0.02 * (attempt + 1))
+    if last_exc is not None:
+        raise last_exc
 
 
 class StateStore:
-    """Per-symbol YAML-in-Markdown state for Trade002 intelligence loop."""
+    """Per-symbol YAML-in-Markdown state for Trade003 intelligence loop."""
 
     def __init__(self, state_dir: str | Path, symbol: str) -> None:
         self.symbol = symbol

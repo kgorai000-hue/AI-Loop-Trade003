@@ -68,10 +68,19 @@ class OHLCVStore:
 
     def _migrate_schema(self, conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(ohlcv)").fetchall()}
-        if "source" not in columns:
-            conn.execute("ALTER TABLE ohlcv ADD COLUMN source TEXT NOT NULL DEFAULT 'mt5'")
-        if "ingested_at" not in columns:
-            conn.execute("ALTER TABLE ohlcv ADD COLUMN ingested_at INTEGER")
+        migrations = {
+            "source": "ALTER TABLE ohlcv ADD COLUMN source TEXT NOT NULL DEFAULT 'mt5'",
+            "ingested_at": "ALTER TABLE ohlcv ADD COLUMN ingested_at INTEGER",
+        }
+        for name, sql in migrations.items():
+            if name in columns:
+                continue
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError as exc:
+                # Concurrent init / already-migrated race on Windows.
+                if "duplicate column" not in str(exc).lower():
+                    raise
 
     def upsert_bars(self, bars: Iterable[BarRecord]) -> int:
         now = int(time.time())

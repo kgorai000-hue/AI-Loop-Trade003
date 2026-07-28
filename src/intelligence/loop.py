@@ -64,17 +64,15 @@ class IntelligenceLoop:
         default_key = strategy_state_key(symbol, strategy) if strategy else symbol
         self.state = StateStore(state_root, state_key or default_key)
 
-        maker_model = "gemini-1.5-pro"
-        checker_model = "gemini-1.5-pro"
+        maker_model = "gemini-2.5-flash"
+        checker_model = "gemini-2.5-pro"
         n_candidates = 6
         max_retries = 5
-        enable_cache = True
         if intel is not None:
             maker_model = intel.maker_model
             checker_model = intel.checker_model
             n_candidates = intel.maker_candidates
             max_retries = intel.max_retries
-            enable_cache = intel.enable_prompt_cache
 
         self.client = GoogleAIClient(
             max_retries=max_retries,

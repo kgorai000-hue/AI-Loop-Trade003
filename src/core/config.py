@@ -1184,7 +1184,7 @@ def load_config(
             rollback_min_sharpe=float(ops_cfg.get("rollback_min_sharpe", 0.5)),
         ),
         project=ProjectConfig(
-            name=str(project_cfg.get("name", "AI-Loop-Trade002")),
+            name=str(project_cfg.get("name", "AI-Loop-Trade003")),
             max_symbols=int(project_cfg.get("max_symbols", 12)),
             primary_timeframe=str(project_cfg.get("primary_timeframe", "M30")),
             graduation_stage=str(project_cfg.get("graduation_stage", "paper")),
@@ -1289,8 +1289,8 @@ def load_config(
         intelligence=IntelligenceConfig(
             enabled=bool(intel_cfg.get("enabled", True)),
             state_dir=str(intel_cfg.get("state_dir", "state")),
-            maker_model=str(intel_cfg.get("maker_model", "gemini-1.5-pro")),
-            checker_model=str(intel_cfg.get("checker_model", "gemini-1.5-pro")),
+            maker_model=str(intel_cfg.get("maker_model", "gemini-2.5-flash")),
+            checker_model=str(intel_cfg.get("checker_model", "gemini-2.5-pro")),
             maker_candidates=int(intel_cfg.get("maker_candidates", 6)),
             max_retries=int(intel_cfg.get("max_retries", 5)),
             enable_prompt_cache=bool(intel_cfg.get("enable_prompt_cache", True)),

@@ -280,8 +280,8 @@ loop_engineering:
 intelligence:
   enabled: true
   state_dir: state
-  maker_model: gemini-1.5-pro
-  checker_model: gemini-1.5-pro
+  maker_model: gemini-2.5-flash
+  checker_model: gemini-2.5-pro
   maker_candidates: 6
   max_retries: 5
   enable_prompt_cache: true

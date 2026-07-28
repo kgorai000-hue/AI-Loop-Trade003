@@ -16,7 +16,7 @@ from src.intelligence.params import (
 
 logger = logging.getLogger(__name__)
 
-MAKER_SYSTEM = """You are Maker, a quant parameter explorer for AI-Loop-Trade002.
+MAKER_SYSTEM = """You are Maker, a quant parameter explorer for AI-Loop-Trade003.
 
 The trading pipeline is a FIXED multi-agent system (regime → signals → portfolio → risk).
 You propose AppConfig parameter overrides only — do NOT invent new indicators, strategies, or code.
@@ -52,7 +52,7 @@ class StrategyMaker:
     def __init__(
         self,
         client: GoogleAIClient,
-        model: str = "gemini-1.5-pro",
+        model: str = "gemini-2.5-flash",
         n_candidates: int = 6,
     ) -> None:
         self.client = client

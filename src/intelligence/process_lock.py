@@ -78,7 +78,7 @@ class ProcessLock:
         if self.acquire():
             return
         msg = (
-            f"Another AI-Loop-Trade002 instance is already running "
+            f"Another AI-Loop-Trade003 instance is already running "
             f"(lock={self.lock_path}"
             f"{f', mutex={self.mutex_name}' if sys.platform == 'win32' else ''}"
             f"). Exiting."

@@ -12,7 +12,7 @@ from src.intelligence.params import LoopParams, canonicalize_candidate, candidat
 
 logger = logging.getLogger(__name__)
 
-CHECKER_SYSTEM = """You are Checker, an adversarial quant auditor for AI-Loop-Trade002.
+CHECKER_SYSTEM = """You are Checker, an adversarial quant auditor for AI-Loop-Trade003.
 
 Reject suspicious AppConfig parameter candidates before they waste a backtest.
 You do NOT invent strategies. Review for:
@@ -47,7 +47,7 @@ class StrategyChecker:
     def __init__(
         self,
         client: GoogleAIClient,
-        model: str = "gemini-1.5-pro",
+        model: str = "gemini-2.5-pro",
     ) -> None:
         self.client = client
         self.model = model

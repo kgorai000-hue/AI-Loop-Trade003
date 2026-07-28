@@ -8,7 +8,7 @@ from typing import Any
 from src.backtest.parameter_spaces import ParameterSpec, default_parameter_specs
 from src.core.config import AppConfig
 
-# M30 is fixed for Trade002 — do not let the loop switch trading.profile (changes TF).
+# M30 is fixed for Trade003 — do not let the loop switch trading.profile (changes TF).
 _EXCLUDED_SPEC_NAMES = frozenset({"trading_profile"})
 
 

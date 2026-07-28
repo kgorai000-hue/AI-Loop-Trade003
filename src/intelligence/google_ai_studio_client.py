@@ -111,18 +111,13 @@ class GoogleAIClient:
             if backend == "vertex":
                 os.environ["GOOGLE_API_KEY"] = api_key
                 os.environ.pop("GEMINI_API_KEY", None)
-                # Express mode must not inherit a regional project location
-                # (e.g. asia-southeast1) or some models 404.
+                # Express mode: API key must not be combined with project/location.
                 os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
                 os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
-                self._client = genai.Client(
-                    vertexai=True,
-                    api_key=api_key,
-                    location="global",
-                )
+                self._client = genai.Client(vertexai=True, api_key=api_key)
                 logger.info(
                     "GoogleAIClient using Agent Platform express mode "
-                    "(vertexai=True, location=global, key_prefix=%s...)",
+                    "(vertexai=True, key_prefix=%s...)",
                     api_key[:5],
                 )
             else:

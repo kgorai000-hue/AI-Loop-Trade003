@@ -201,9 +201,11 @@ class GoogleAIClient:
                 }
                 if json_mode:
                     config_kwargs["response_mime_type"] = "application/json"
-                # Gemini 2.5 may spend output budget on "thinking"; keep room for JSON.
+                # Newer Flash/Pro may spend output budget on "thinking"; keep room for JSON.
                 thinking = getattr(types, "ThinkingConfig", None)
-                if thinking is not None and "2.5" in model:
+                if thinking is not None and any(
+                    tag in model for tag in ("2.5", "3.5", "3.6", "3-")
+                ):
                     try:
                         config_kwargs["thinking_config"] = thinking(thinking_budget=0)
                     except Exception:

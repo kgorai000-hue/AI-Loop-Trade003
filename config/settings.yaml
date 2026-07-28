@@ -284,8 +284,8 @@ intelligence:
   enabled: true
   state_dir: state
   maker_model: gemini-2.5-flash
-  # Express mode: pro may 404 in some regions; flash is available globally.
-  checker_model: gemini-2.5-flash
+  # Different model from Maker; express mode uses location=global.
+  checker_model: gemini-3.6-flash
   maker_candidates: 6
   max_retries: 5
   enable_prompt_cache: true

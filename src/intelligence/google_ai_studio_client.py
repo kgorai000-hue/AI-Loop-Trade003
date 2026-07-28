@@ -18,7 +18,7 @@ class GoogleAIClientError(RuntimeError):
 
 class GoogleAIClient:
     """
-    Thin wrapper around the Google Generative AI SDK.
+    Thin wrapper around the Google Gen AI SDK (`google-genai`).
     API key: GEMINI_API_KEY environment variable only.
     """
 
@@ -41,7 +41,6 @@ class GoogleAIClient:
             return False
         if "..." in key:
             return False
-        # Google AI Studio keys typically start with "AIza" or similar
         if len(key) < 20:
             return False
         return True
@@ -58,13 +57,12 @@ class GoogleAIClient:
                 "GEMINI_API_KEY is missing or looks like a placeholder"
             )
         try:
-            import google.generativeai as genai
+            from google import genai
         except ImportError as exc:
             raise GoogleAIClientError(
-                "google-generativeai package not installed; pip install google-generativeai"
+                "google-genai package not installed; pip install google-genai"
             ) from exc
-        genai.configure(api_key=api_key)
-        self._client = genai
+        self._client = genai.Client(api_key=api_key)
         return self._client
 
     def _is_retryable(self, exc: BaseException) -> bool:
@@ -76,7 +74,6 @@ class GoogleAIClient:
             return True
         if "500" in msg or "502" in msg or "503" in msg or "529" in msg:
             return True
-        # Google API exception attributes
         status = getattr(exc, "status_code", None)
         if status in (408, 429, 500, 502, 503, 529):
             return True
@@ -94,27 +91,29 @@ class GoogleAIClient:
         client = self._get_client()
         last_exc: Optional[BaseException] = None
 
+        try:
+            from google.genai import types
+        except ImportError as exc:
+            raise GoogleAIClientError(
+                "google-genai package not installed; pip install google-genai"
+            ) from exc
+
         for attempt in range(1, self.max_retries + 1):
             try:
-                genai_model = client.GenerativeModel(
-                    model_name=model,
-                    system_instruction=system,
+                response = client.models.generate_content(
+                    model=model,
+                    contents=user,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        max_output_tokens=max_tokens,
+                        temperature=temperature,
+                    ),
                 )
-                
-                kwargs: dict[str, Any] = {
-                    "contents": user,
-                    "generation_config": {
-                        "max_output_tokens": max_tokens,
-                        "temperature": temperature,
-                    },
-                }
+                text = getattr(response, "text", None)
+                if text:
+                    return str(text).strip()
+                raise GoogleAIClientError("Empty response from Google AI Studio")
 
-                response = genai_model.generate_content(**kwargs)
-                if response.text:
-                    return response.text.strip()
-                else:
-                    raise GoogleAIClientError("Empty response from Google AI Studio")
-                    
             except Exception as exc:
                 last_exc = exc
                 if attempt >= self.max_retries or not self._is_retryable(exc):
@@ -141,7 +140,6 @@ class GoogleAIClient:
         text = text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
-            # drop first fence and optional trailing fence
             if lines and lines[0].startswith("```"):
                 lines = lines[1:]
             if lines and lines[-1].strip() == "```":
@@ -153,7 +151,6 @@ class GoogleAIClient:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            # find first { or [
             start_obj = text.find("{")
             start_arr = text.find("[")
             starts = [i for i in (start_obj, start_arr) if i >= 0]
@@ -161,7 +158,6 @@ class GoogleAIClient:
                 raise
             start = min(starts)
             snippet = text[start:]
-            # balance braces roughly
             for end in range(len(snippet), 0, -1):
                 try:
                     return json.loads(snippet[:end])

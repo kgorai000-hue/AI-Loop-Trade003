@@ -88,7 +88,7 @@ class ParamValidator:
         )
         metrics = _metrics_from_result(trial)
         accepted = evaluation.verdict == TrialVerdict.TIER_B_ADOPT or (
-            bool(getattr(config.loop_engineering, "adopt_tier_a", False))
+            bool(getattr(self.base_config.loop_engineering, "adopt_tier_a", False))
             and evaluation.verdict == TrialVerdict.TIER_A
         )
         return ValidationOutcome(

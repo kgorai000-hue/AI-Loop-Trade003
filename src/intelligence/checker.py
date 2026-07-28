@@ -76,8 +76,9 @@ class StrategyChecker:
                 model=self.model,
                 system=CHECKER_SYSTEM,
                 user=user,
-                max_tokens=2048,
+                max_tokens=8192,
                 temperature=0.0,
+                json_mode=True,
             )
             data = self.client.extract_json(raw)
         except (GoogleAIClientError, Exception) as exc:

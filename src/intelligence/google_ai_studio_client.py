@@ -102,14 +102,13 @@ class GoogleAIClient:
         backend = self.resolve_backend(api_key)
         self._backend = backend
 
-        # Pin both env names to the chosen key so the SDK does not prefer a
-        # depleted AI Studio key when both variables are set.
+        # Avoid SDK ambiguity when both env vars are set.
         prev_google = os.environ.get("GOOGLE_API_KEY")
         prev_gemini = os.environ.get("GEMINI_API_KEY")
         try:
-            os.environ["GOOGLE_API_KEY"] = api_key
-            os.environ["GEMINI_API_KEY"] = api_key
             if backend == "vertex":
+                os.environ["GOOGLE_API_KEY"] = api_key
+                os.environ.pop("GEMINI_API_KEY", None)
                 self._client = genai.Client(vertexai=True, api_key=api_key)
                 logger.info(
                     "GoogleAIClient using Agent Platform express mode "
@@ -117,6 +116,8 @@ class GoogleAIClient:
                     api_key[:5],
                 )
             else:
+                os.environ["GEMINI_API_KEY"] = api_key
+                os.environ.pop("GOOGLE_API_KEY", None)
                 self._client = genai.Client(api_key=api_key)
                 logger.info(
                     "GoogleAIClient using Gemini Developer API "
@@ -161,6 +162,7 @@ class GoogleAIClient:
         user: str,
         max_tokens: int = 4096,
         temperature: float = 0.2,
+        json_mode: bool = False,
     ) -> str:
         client = self._get_client()
         last_exc: Optional[BaseException] = None
@@ -174,14 +176,25 @@ class GoogleAIClient:
 
         for attempt in range(1, self.max_retries + 1):
             try:
+                config_kwargs: dict[str, Any] = {
+                    "system_instruction": system,
+                    "max_output_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+                if json_mode:
+                    config_kwargs["response_mime_type"] = "application/json"
+                # Gemini 2.5 may spend output budget on "thinking"; keep room for JSON.
+                thinking = getattr(types, "ThinkingConfig", None)
+                if thinking is not None and "2.5" in model:
+                    try:
+                        config_kwargs["thinking_config"] = thinking(thinking_budget=0)
+                    except Exception:
+                        pass
+
                 response = client.models.generate_content(
                     model=model,
                     contents=user,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        max_output_tokens=max_tokens,
-                        temperature=temperature,
-                    ),
+                    config=types.GenerateContentConfig(**config_kwargs),
                 )
                 text = getattr(response, "text", None)
                 if text:
@@ -210,7 +223,7 @@ class GoogleAIClient:
 
     @staticmethod
     def extract_json(text: str) -> Any:
-        """Parse JSON from a model reply; tolerate fenced blocks."""
+        """Parse JSON from a model reply; tolerate fenced blocks and light truncation."""
         text = text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
@@ -237,4 +250,43 @@ class GoogleAIClient:
                     return json.loads(snippet[:end])
                 except json.JSONDecodeError:
                     continue
+            repaired = GoogleAIClient._repair_truncated_json(snippet)
+            if repaired is not None:
+                return repaired
             raise
+
+    @staticmethod
+    def _repair_truncated_json(snippet: str) -> Any | None:
+        """Best-effort close of truncated JSON objects/arrays/strings."""
+        in_string = False
+        escape = False
+        stack: list[str] = []
+        for ch in snippet:
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]" and stack and ch == stack[-1]:
+                stack.pop()
+
+        candidate = snippet.rstrip()
+        if in_string:
+            candidate += '"'
+        # Drop trailing comma before closing
+        candidate = candidate.rstrip()
+        if candidate.endswith(","):
+            candidate = candidate[:-1]
+        while stack:
+            candidate += stack.pop()
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return None

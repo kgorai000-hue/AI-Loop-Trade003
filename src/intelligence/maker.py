@@ -85,8 +85,9 @@ class StrategyMaker:
                 model=self.model,
                 system=MAKER_SYSTEM,
                 user=user,
-                max_tokens=2048,
+                max_tokens=8192,
                 temperature=0.4,
+                json_mode=True,
             )
             data = self.client.extract_json(raw)
         except (GoogleAIClientError, Exception) as exc:

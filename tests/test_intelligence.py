@@ -40,6 +40,13 @@ def test_google_ai_prefers_aq_key_over_gemini_env(monkeypatch):
     assert GoogleAIClient.resolve_backend(chosen) == "vertex"
 
 
+def test_extract_json_repairs_truncated_object():
+    raw = '{"candidates":[{"overrides":{"indicators.signal_score_threshold":0.2},"rationale":"partial'
+    data = GoogleAIClient.extract_json(raw)
+    assert isinstance(data, dict)
+    assert "candidates" in data
+
+
 def test_llm_specs_exclude_trading_profile():
     names = {s.name for s in llm_parameter_specs()}
     assert "trading_profile" not in names

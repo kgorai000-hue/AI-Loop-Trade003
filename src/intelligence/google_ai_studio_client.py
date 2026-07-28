@@ -20,14 +20,14 @@ class GoogleAIClient:
     """
     Thin wrapper around the Google Gen AI SDK (`google-genai`).
 
-    Env (first match wins):
-      - GEMINI_API_KEY
-      - GOOGLE_API_KEY
+    Env candidates: ``GOOGLE_API_KEY``, ``GEMINI_API_KEY``.
+    Preference: keys starting with ``AQ.`` (Agent Platform express), then
+    ``GOOGLE_API_KEY``, then ``GEMINI_API_KEY``.
 
-    Backend selection:
-      - Keys starting with ``AQ.`` → Agent Platform express mode (``vertexai=True``)
-      - Otherwise → Gemini Developer API (AI Studio)
-      - Override with ``GEMINI_BACKEND=vertex|ai_studio``
+    Backend:
+      - ``AQ....`` → Agent Platform express (``vertexai=True``)
+      - otherwise → Gemini Developer API (AI Studio)
+      - override with ``GEMINI_BACKEND=vertex|ai_studio``
     """
 
     def __init__(
@@ -44,10 +44,16 @@ class GoogleAIClient:
 
     @staticmethod
     def resolve_api_key() -> str | None:
-        for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
-            raw = os.environ.get(name)
-            if raw and raw.strip():
-                return raw.strip()
+        """Prefer AQ. express keys, then GOOGLE_API_KEY, then GEMINI_API_KEY."""
+        google = (os.environ.get("GOOGLE_API_KEY") or "").strip()
+        gemini = (os.environ.get("GEMINI_API_KEY") or "").strip()
+        ordered = [k for k in (google, gemini) if k]
+        for key in ordered:
+            if GoogleAIClient.looks_like_api_key(key) and key.startswith("AQ."):
+                return key
+        for key in ordered:
+            if GoogleAIClient.looks_like_api_key(key):
+                return key
         return None
 
     @staticmethod
@@ -95,13 +101,37 @@ class GoogleAIClient:
 
         backend = self.resolve_backend(api_key)
         self._backend = backend
-        if backend == "vertex":
-            # Agent Platform / Vertex express mode (keys like AQ....)
-            self._client = genai.Client(vertexai=True, api_key=api_key)
-            logger.info("GoogleAIClient using Agent Platform express mode (vertexai=True)")
-        else:
-            self._client = genai.Client(api_key=api_key)
-            logger.info("GoogleAIClient using Gemini Developer API (AI Studio)")
+
+        # Pin both env names to the chosen key so the SDK does not prefer a
+        # depleted AI Studio key when both variables are set.
+        prev_google = os.environ.get("GOOGLE_API_KEY")
+        prev_gemini = os.environ.get("GEMINI_API_KEY")
+        try:
+            os.environ["GOOGLE_API_KEY"] = api_key
+            os.environ["GEMINI_API_KEY"] = api_key
+            if backend == "vertex":
+                self._client = genai.Client(vertexai=True, api_key=api_key)
+                logger.info(
+                    "GoogleAIClient using Agent Platform express mode "
+                    "(vertexai=True, key_prefix=%s...)",
+                    api_key[:5],
+                )
+            else:
+                self._client = genai.Client(api_key=api_key)
+                logger.info(
+                    "GoogleAIClient using Gemini Developer API "
+                    "(AI Studio, key_prefix=%s...)",
+                    api_key[:5],
+                )
+        finally:
+            if prev_google is None:
+                os.environ.pop("GOOGLE_API_KEY", None)
+            else:
+                os.environ["GOOGLE_API_KEY"] = prev_google
+            if prev_gemini is None:
+                os.environ.pop("GEMINI_API_KEY", None)
+            else:
+                os.environ["GEMINI_API_KEY"] = prev_gemini
         return self._client
 
     def _is_retryable(self, exc: BaseException) -> bool:

@@ -31,6 +31,15 @@ def test_google_ai_backend_detects_express_key():
     assert GoogleAIClient.resolve_backend("AIzaSyabcdefghijklmnop123456789") == "ai_studio"
 
 
+def test_google_ai_prefers_aq_key_over_gemini_env(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaSyabcdefghijklmnop123456789")
+    monkeypatch.setenv("GOOGLE_API_KEY", "AQ.Ab8Rabcdefghijklmnop1234567890")
+    chosen = GoogleAIClient.resolve_api_key()
+    assert chosen is not None
+    assert chosen.startswith("AQ.")
+    assert GoogleAIClient.resolve_backend(chosen) == "vertex"
+
+
 def test_llm_specs_exclude_trading_profile():
     names = {s.name for s in llm_parameter_specs()}
     assert "trading_profile" not in names

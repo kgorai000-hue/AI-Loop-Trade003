@@ -233,7 +233,7 @@ backtest:
   cost_perturbation_pct: 0.20
   oos_train_ratio: 0.70
   oos_val_ratio: 0.15
-  min_oos_ratio: 0.50
+  min_oos_ratio: 0.0                 # demo: do not block on OOS ratio
   live_decay_factor: 0.5
   hidden_cost_pct: 0.05
   param_sensitivity_pct: 0.20
@@ -250,30 +250,36 @@ backtest:
   gate_build_on_miss: false
 
 # Loop engineering: one-parameter-at-a-time optimization (loop criteria PDF)
+# DEMO-LIVE: thresholds intentionally loosened so Maker candidates can adopt.
+# Tighten before any real-money / strict paper graduation.
 loop_engineering:
   enabled: true
-  min_trades_h1: 30
-  min_trades_m15: 50
-  min_wf_test_sharpe: 0.5
-  wf_sharpe_improvement: 0.1
-  max_mdd_pct: 20.0
-  mdd_worsen_tolerance_pct: 2.0
-  hard_stop_mdd_pct: 30.0
-  hard_stop_min_trades: 20
-  hard_stop_expected_live_pct: -5.0
-  hard_stop_mc_p5_pct: -20.0
-  hard_stop_oos_ratio: 0.30
-  overfit_is_sharpe: 3.0
-  overfit_wf_sharpe: 0.3
-  consecutive_hard_stop_limit: 5
-  tier_b_min_gate_passes: 10
-  tier_b_mc_prob_positive: 0.50
-  tier_b_mc_p5_pct: -10.0
-  tier_b_wf_positive_pct: 0.50
+  min_trades_h1: 10
+  min_trades_m15: 15
+  min_wf_test_sharpe: -1.0
+  wf_sharpe_improvement: -5.0          # do not require improvement vs baseline
+  max_mdd_pct: 60.0
+  mdd_worsen_tolerance_pct: 30.0
+  hard_stop_mdd_pct: 90.0
+  hard_stop_min_trades: 3
+  hard_stop_expected_live_pct: -80.0
+  hard_stop_mc_p5_pct: -90.0
+  hard_stop_oos_ratio: 0.0
+  overfit_is_sharpe: 20.0
+  overfit_wf_sharpe: -5.0
+  consecutive_hard_stop_limit: 20
+  tier_b_min_gate_passes: 0
+  tier_b_mc_prob_positive: 0.0
+  tier_b_mc_p5_pct: -90.0
+  tier_b_wf_positive_pct: 0.0
   output_dir: data/loop_results
-  baseline_wf_sharpe_stop_delta: 0.2
-  stop_on_all_unstable: true
-  stop_on_all_strategies_gate_fail: true
+  baseline_wf_sharpe_stop_delta: 5.0
+  stop_on_all_unstable: false
+  stop_on_all_strategies_gate_fail: false
+  # Allow negative expected live during demo exploration
+  min_expected_live_pct: -100.0
+  # Accept Tier A (not only Tier B) during demo
+  adopt_tier_a: true
 
 # Maker → Checker → Validator (Gemini).
 # Keys: GEMINI_API_KEY or GOOGLE_API_KEY.

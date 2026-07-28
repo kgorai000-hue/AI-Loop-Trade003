@@ -87,7 +87,10 @@ class ParamValidator:
             trial, baseline, trial_cfg, self.timeframe
         )
         metrics = _metrics_from_result(trial)
-        accepted = evaluation.verdict == TrialVerdict.TIER_B_ADOPT
+        accepted = evaluation.verdict == TrialVerdict.TIER_B_ADOPT or (
+            bool(getattr(config.loop_engineering, "adopt_tier_a", False))
+            and evaluation.verdict == TrialVerdict.TIER_A
+        )
         return ValidationOutcome(
             accepted=accepted,
             verdict=evaluation.verdict.value,

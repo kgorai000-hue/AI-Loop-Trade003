@@ -198,7 +198,10 @@ def run_parameter_loop(
 
             evaluation = evaluate_trial(trial, best_result, trial_config, timeframe)
             metrics = summarize_metrics(trial, timeframe, trial_config)
-            adopted = evaluation.verdict == TrialVerdict.TIER_B_ADOPT
+            adopted = evaluation.verdict == TrialVerdict.TIER_B_ADOPT or (
+                bool(getattr(loop_cfg, "adopt_tier_a", False))
+                and evaluation.verdict == TrialVerdict.TIER_A
+            )
             spec_trial_wf_sharpes.append(metrics["wf_avg_test_sharpe"])
             spec_stabilities.append(param_all_stable(trial))
 

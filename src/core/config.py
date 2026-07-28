@@ -538,6 +538,9 @@ class LoopEngineeringConfig:
     baseline_wf_sharpe_stop_delta: float
     stop_on_all_unstable: bool
     stop_on_all_strategies_gate_fail: bool
+    # Demo / relaxed adoption
+    min_expected_live_pct: float = 0.0
+    adopt_tier_a: bool = False
 
 
 @dataclass
@@ -1285,6 +1288,8 @@ def load_config(
             stop_on_all_strategies_gate_fail=bool(
                 loop_cfg.get("stop_on_all_strategies_gate_fail", True)
             ),
+            min_expected_live_pct=float(loop_cfg.get("min_expected_live_pct", 0.0)),
+            adopt_tier_a=bool(loop_cfg.get("adopt_tier_a", False)),
         ),
         intelligence=IntelligenceConfig(
             enabled=bool(intel_cfg.get("enabled", True)),

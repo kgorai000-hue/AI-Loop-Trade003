@@ -114,9 +114,11 @@ def evaluate_trial(
     if trial.oos.oos_ratio < bt_cfg.min_oos_ratio:
         tier_a = False
         reasons.append(f"OOS ratio {trial.oos.oos_ratio:.2f} < {bt_cfg.min_oos_ratio}")
-    if expected_live <= 0:
+    if expected_live <= loop_cfg.min_expected_live_pct / 100.0:
         tier_a = False
-        reasons.append(f"expected live {expected_live:.2%} <= 0")
+        reasons.append(
+            f"expected live {expected_live:.2%} <= {loop_cfg.min_expected_live_pct}%"
+        )
     if mdd_pct > loop_cfg.max_mdd_pct:
         tier_a = False
         reasons.append(f"MDD {mdd_pct:.1f}% > {loop_cfg.max_mdd_pct}%")

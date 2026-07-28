@@ -1290,7 +1290,7 @@ def load_config(
             enabled=bool(intel_cfg.get("enabled", True)),
             state_dir=str(intel_cfg.get("state_dir", "state")),
             maker_model=str(intel_cfg.get("maker_model", "gemini-2.5-flash")),
-            checker_model=str(intel_cfg.get("checker_model", "gemini-2.5-pro")),
+            checker_model=str(intel_cfg.get("checker_model", "gemini-2.5-flash")),
             maker_candidates=int(intel_cfg.get("maker_candidates", 6)),
             max_retries=int(intel_cfg.get("max_retries", 5)),
             enable_prompt_cache=bool(intel_cfg.get("enable_prompt_cache", True)),

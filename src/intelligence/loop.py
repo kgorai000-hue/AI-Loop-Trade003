@@ -65,7 +65,7 @@ class IntelligenceLoop:
         self.state = StateStore(state_root, state_key or default_key)
 
         maker_model = "gemini-2.5-flash"
-        checker_model = "gemini-2.5-pro"
+        checker_model = "gemini-2.5-flash"
         n_candidates = 6
         max_retries = 5
         if intel is not None:

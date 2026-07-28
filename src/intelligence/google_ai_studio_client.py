@@ -105,14 +105,24 @@ class GoogleAIClient:
         # Avoid SDK ambiguity when both env vars are set.
         prev_google = os.environ.get("GOOGLE_API_KEY")
         prev_gemini = os.environ.get("GEMINI_API_KEY")
+        prev_location = os.environ.get("GOOGLE_CLOUD_LOCATION")
+        prev_project = os.environ.get("GOOGLE_CLOUD_PROJECT")
         try:
             if backend == "vertex":
                 os.environ["GOOGLE_API_KEY"] = api_key
                 os.environ.pop("GEMINI_API_KEY", None)
-                self._client = genai.Client(vertexai=True, api_key=api_key)
+                # Express mode must not inherit a regional project location
+                # (e.g. asia-southeast1) or some models 404.
+                os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
+                os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+                self._client = genai.Client(
+                    vertexai=True,
+                    api_key=api_key,
+                    location="global",
+                )
                 logger.info(
                     "GoogleAIClient using Agent Platform express mode "
-                    "(vertexai=True, key_prefix=%s...)",
+                    "(vertexai=True, location=global, key_prefix=%s...)",
                     api_key[:5],
                 )
             else:
@@ -133,6 +143,14 @@ class GoogleAIClient:
                 os.environ.pop("GEMINI_API_KEY", None)
             else:
                 os.environ["GEMINI_API_KEY"] = prev_gemini
+            if prev_location is None:
+                os.environ.pop("GOOGLE_CLOUD_LOCATION", None)
+            else:
+                os.environ["GOOGLE_CLOUD_LOCATION"] = prev_location
+            if prev_project is None:
+                os.environ.pop("GOOGLE_CLOUD_PROJECT", None)
+            else:
+                os.environ["GOOGLE_CLOUD_PROJECT"] = prev_project
         return self._client
 
     def _is_retryable(self, exc: BaseException) -> bool:

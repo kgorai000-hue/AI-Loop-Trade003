@@ -47,7 +47,7 @@ class StrategyChecker:
     def __init__(
         self,
         client: GoogleAIClient,
-        model: str = "gemini-2.5-pro",
+        model: str = "gemini-2.5-flash",
     ) -> None:
         self.client = client
         self.model = model

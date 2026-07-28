@@ -1,4 +1,4 @@
-"""Anthropic Maker → Checker → Validator intelligence loop for Trade002."""
+"""Google AI Studio (Gemini) Maker → Checker → Validator intelligence loop for Trade002."""
 
 from src.intelligence.loop import IntelligenceLoop, IntelligenceOutcome, apply_state_overrides
 from src.intelligence.params import LoopParams, params_from_config, symbol_to_state_key

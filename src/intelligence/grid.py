@@ -1,4 +1,4 @@
-"""Grid fallback when Anthropic is unavailable or LLM path finds no adopt."""
+"""Grid fallback when Google AI Studio is unavailable or LLM path finds no adopt."""
 
 from __future__ import annotations
 

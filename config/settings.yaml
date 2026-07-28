@@ -275,13 +275,13 @@ loop_engineering:
   stop_on_all_unstable: true
   stop_on_all_strategies_gate_fail: true
 
-# Maker → Checker → Validator (Anthropic).
+# Maker → Checker → Validator (Gemini).
 # No / invalid API key → seed settings.yaml defaults (demo can run without LLM).
 intelligence:
   enabled: true
   state_dir: state
-  maker_model: claude-sonnet-4-5
-  checker_model: claude-opus-4-8
+  maker_model: gemini-1.5-pro
+  checker_model: gemini-1.5-pro
   maker_candidates: 6
   max_retries: 5
   enable_prompt_cache: true
@@ -298,9 +298,9 @@ intelligence:
     optimize_pairs: true
     # Every loop-engineering pass checks ALL Asset Groups (not only the active trade subset).
     check_all_asset_groups: true
-    # Demo without Anthropic: seed config defaults instead of multi-hour grid.
+    # Demo without Gemini: seed config defaults instead of multi-hour grid.
     no_api_seed_baseline: true
-    # After grid finds no improvement, still seed defaults so resident loop can trade.
+    # After grid finds no improvement: still seed defaults so resident loop can trade.
     seed_baseline_if_no_adopt: true
 
 # Lesson 08: Beta 分解とヘッジ（リテールは dry-run のみ）

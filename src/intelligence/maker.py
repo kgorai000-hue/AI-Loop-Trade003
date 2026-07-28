@@ -1,4 +1,4 @@
-"""Maker: Anthropic proposals for AppConfig strategy parameters."""
+"""Maker: Google AI Studio (Gemini) proposals for AppConfig strategy parameters."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from src.intelligence.anthropic_client import AnthropicClient, AnthropicClientError
+from src.intelligence.google_ai_studio_client import GoogleAIClient, GoogleAIClientError
 from src.intelligence.params import (
     LoopParams,
     allowed_space_description,
@@ -51,8 +51,8 @@ class MakerCandidate:
 class StrategyMaker:
     def __init__(
         self,
-        client: AnthropicClient,
-        model: str = "claude-sonnet-4-5",
+        client: GoogleAIClient,
+        model: str = "gemini-1.5-pro",
         n_candidates: int = 6,
     ) -> None:
         self.client = client
@@ -68,28 +68,28 @@ class StrategyMaker:
         symbol: str,
         strategy: str,
     ) -> list[MakerCandidate]:
-        cached = (
+        context = (
             f"SYMBOL: {symbol}\nSTRATEGY: {strategy}\nTIMEFRAME: M30\n\n"
             f"SKILL LESSONS:\n{skills_text}\n\n"
             f"ALLOWED SPACE:\n{allowed_space_description()}\n"
         )
         user = (
+            f"{context}\n\n"
             f"Propose exactly {self.n_candidates} distinct parameter candidates.\n"
             f"Current params: {current_params.as_dict()}\n"
             f"Last metrics: {last_metrics}\n"
             "Favor diversity across the allowed space while avoiding SKILL failure modes."
         )
         try:
-            raw = self.client.messages_create(
+            raw = self.client.generate_content(
                 model=self.model,
                 system=MAKER_SYSTEM,
                 user=user,
-                cached_context=cached,
                 max_tokens=2048,
                 temperature=0.4,
             )
             data = self.client.extract_json(raw)
-        except (AnthropicClientError, Exception) as exc:
+        except (GoogleAIClientError, Exception) as exc:
             logger.error("Maker propose failed: %s", exc)
             return []
         return self._parse_candidates(data)

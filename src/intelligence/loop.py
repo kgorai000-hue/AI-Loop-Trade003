@@ -10,7 +10,7 @@ from typing import Any
 
 from src.core.config import AppConfig
 from src.data.store import OHLCVStore
-from src.intelligence.anthropic_client import AnthropicClient
+from src.intelligence.google_ai_studio_client import GoogleAIClient
 from src.intelligence.checker import StrategyChecker
 from src.intelligence.grid import run_grid_search
 from src.intelligence.maker import StrategyMaker
@@ -64,8 +64,8 @@ class IntelligenceLoop:
         default_key = strategy_state_key(symbol, strategy) if strategy else symbol
         self.state = StateStore(state_root, state_key or default_key)
 
-        maker_model = "claude-sonnet-4-5"
-        checker_model = "claude-opus-4-8"
+        maker_model = "gemini-1.5-pro"
+        checker_model = "gemini-1.5-pro"
         n_candidates = 6
         max_retries = 5
         enable_cache = True
@@ -76,9 +76,8 @@ class IntelligenceLoop:
             max_retries = intel.max_retries
             enable_cache = intel.enable_prompt_cache
 
-        self.client = AnthropicClient(
+        self.client = GoogleAIClient(
             max_retries=max_retries,
-            enable_prompt_cache=enable_cache,
         )
         self.maker = StrategyMaker(
             self.client, model=maker_model, n_candidates=n_candidates
@@ -106,10 +105,10 @@ class IntelligenceLoop:
         state = self.state.read_state()
         last_metrics = state.get("last_metrics") or {}
 
-        # Demo path: no valid Anthropic key → seed settings defaults (seconds, not hours).
+        # Demo path: no valid Gemini key → seed settings defaults (seconds, not hours).
         if not self.client.available() and self.no_api_seed_baseline:
             logger.info(
-                "No valid ANTHROPIC_API_KEY — seeding config defaults for %s (%s)",
+                "No valid GEMINI_API_KEY — seeding config defaults for %s (%s)",
                 self.symbol,
                 self.strategy,
             )

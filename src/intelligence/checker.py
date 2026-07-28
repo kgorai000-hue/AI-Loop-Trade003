@@ -1,4 +1,4 @@
-"""Checker: adversarial Anthropic review of Maker candidates."""
+"""Checker: adversarial Google AI Studio (Gemini) review of Maker candidates."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from src.intelligence.anthropic_client import AnthropicClient, AnthropicClientError
+from src.intelligence.google_ai_studio_client import GoogleAIClient, GoogleAIClientError
 from src.intelligence.maker import MakerCandidate
 from src.intelligence.params import LoopParams, canonicalize_candidate, candidate_key
 
@@ -46,8 +46,8 @@ class CheckerReview:
 class StrategyChecker:
     def __init__(
         self,
-        client: AnthropicClient,
-        model: str = "claude-opus-4-8",
+        client: GoogleAIClient,
+        model: str = "gemini-1.5-pro",
     ) -> None:
         self.client = client
         self.model = model
@@ -61,26 +61,26 @@ class StrategyChecker:
         if not candidates:
             return []
 
-        cached = f"SKILL LESSONS:\n{skills_text}\n"
+        context = f"SKILL LESSONS:\n{skills_text}\n"
         payload = [
             {"overrides": c.params.as_dict(), "rationale": c.rationale}
             for c in candidates
         ]
         user = (
+            f"{context}\n\n"
             "Adversarially review each candidate. Prefer reject when uncertain.\n"
             f"CANDIDATES:\n{payload}"
         )
         try:
-            raw = self.client.messages_create(
+            raw = self.client.generate_content(
                 model=self.model,
                 system=CHECKER_SYSTEM,
                 user=user,
-                cached_context=cached,
                 max_tokens=2048,
                 temperature=0.0,
             )
             data = self.client.extract_json(raw)
-        except (AnthropicClientError, Exception) as exc:
+        except (GoogleAIClientError, Exception) as exc:
             logger.error("Checker review failed: %s", exc)
             return [
                 CheckerReview(

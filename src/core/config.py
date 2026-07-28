@@ -291,7 +291,7 @@ class ResidentLoopConfig:
     require_adopted_params: bool = True
     optimize_pairs: bool = True
     check_all_asset_groups: bool = True
-    # When no valid Anthropic key: seed settings.yaml defaults (skip multi-hour grid).
+    # When no valid Gemini key: seed settings.yaml defaults (skip multi-hour grid).
     no_api_seed_baseline: bool = True
     # When grid finds no improvement: still seed defaults so demo loop can trade.
     seed_baseline_if_no_adopt: bool = True
@@ -1289,8 +1289,8 @@ def load_config(
         intelligence=IntelligenceConfig(
             enabled=bool(intel_cfg.get("enabled", True)),
             state_dir=str(intel_cfg.get("state_dir", "state")),
-            maker_model=str(intel_cfg.get("maker_model", "claude-sonnet-4-5")),
-            checker_model=str(intel_cfg.get("checker_model", "claude-opus-4-8")),
+            maker_model=str(intel_cfg.get("maker_model", "gemini-1.5-pro")),
+            checker_model=str(intel_cfg.get("checker_model", "gemini-1.5-pro")),
             maker_candidates=int(intel_cfg.get("maker_candidates", 6)),
             max_retries=int(intel_cfg.get("max_retries", 5)),
             enable_prompt_cache=bool(intel_cfg.get("enable_prompt_cache", True)),

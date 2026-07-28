@@ -1,4 +1,4 @@
-"""Anthropic Messages API client with exponential backoff and prompt caching."""
+"""Google AI Studio (Gemini) API client with exponential backoff."""
 
 from __future__ import annotations
 
@@ -12,83 +12,60 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-class AnthropicClientError(RuntimeError):
+class GoogleAIClientError(RuntimeError):
     pass
 
 
-class AnthropicClient:
+class GoogleAIClient:
     """
-    Thin wrapper around the official `anthropic` SDK.
-    API key: ANTHROPIC_API_KEY environment variable only.
+    Thin wrapper around the Google Generative AI SDK.
+    API key: GEMINI_API_KEY environment variable only.
     """
 
     def __init__(
         self,
         max_retries: int = 5,
-        enable_prompt_cache: bool = True,
         base_delay_sec: float = 1.0,
         max_delay_sec: float = 60.0,
     ) -> None:
         self.max_retries = max(1, int(max_retries))
-        self.enable_prompt_cache = bool(enable_prompt_cache)
         self.base_delay_sec = float(base_delay_sec)
         self.max_delay_sec = float(max_delay_sec)
         self._client = None
 
     @staticmethod
     def looks_like_api_key(api_key: str | None) -> bool:
-        """True only for a non-placeholder Anthropic key shape."""
+        """True only for a non-placeholder Google AI Studio key shape."""
         key = (api_key or "").strip()
         if not key:
             return False
         if "..." in key:
             return False
-        if not key.startswith("sk-ant-"):
+        # Google AI Studio keys typically start with "AIza" or similar
+        if len(key) < 20:
             return False
-        return len(key) >= 20
+        return True
 
     def available(self) -> bool:
-        return self.looks_like_api_key(os.environ.get("ANTHROPIC_API_KEY"))
+        return self.looks_like_api_key(os.environ.get("GEMINI_API_KEY"))
 
     def _get_client(self):
         if self._client is not None:
             return self._client
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("GEMINI_API_KEY")
         if not self.looks_like_api_key(api_key):
-            raise AnthropicClientError(
-                "ANTHROPIC_API_KEY is missing or looks like a placeholder"
+            raise GoogleAIClientError(
+                "GEMINI_API_KEY is missing or looks like a placeholder"
             )
         try:
-            import anthropic
+            import google.generativeai as genai
         except ImportError as exc:
-            raise AnthropicClientError(
-                "anthropic package not installed; pip install anthropic"
+            raise GoogleAIClientError(
+                "google-generativeai package not installed; pip install google-generativeai"
             ) from exc
-        self._client = anthropic.Anthropic(api_key=api_key)
+        genai.configure(api_key=api_key)
+        self._client = genai
         return self._client
-
-    def _system_blocks(
-        self,
-        system: str,
-        cached_context: Optional[str] = None,
-    ) -> list[dict[str, Any]] | str:
-        if not self.enable_prompt_cache or not cached_context:
-            if cached_context:
-                return f"{system}\n\n---\nCACHED CONTEXT\n---\n{cached_context}"
-            return system
-
-        blocks: list[dict[str, Any]] = [
-            {
-                "type": "text",
-                "text": system,
-            },
-            {
-                "type": "text",
-                "text": cached_context,
-                "cache_control": {"type": "ephemeral"},
-            },
-        ]
-        return blocks
 
     def _is_retryable(self, exc: BaseException) -> bool:
         name = type(exc).__name__.lower()
@@ -99,57 +76,56 @@ class AnthropicClient:
             return True
         if "500" in msg or "502" in msg or "503" in msg or "529" in msg:
             return True
-        # anthropic SDK exception attributes
+        # Google API exception attributes
         status = getattr(exc, "status_code", None)
         if status in (408, 429, 500, 502, 503, 529):
             return True
         return False
 
-    def messages_create(
+    def generate_content(
         self,
         *,
         model: str,
         system: str,
         user: str,
-        cached_context: Optional[str] = None,
         max_tokens: int = 4096,
         temperature: float = 0.2,
     ) -> str:
         client = self._get_client()
-        system_payload = self._system_blocks(system, cached_context=cached_context)
         last_exc: Optional[BaseException] = None
 
         for attempt in range(1, self.max_retries + 1):
             try:
+                genai_model = client.GenerativeModel(
+                    model_name=model,
+                    system_instruction=system,
+                )
+                
                 kwargs: dict[str, Any] = {
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "messages": [{"role": "user", "content": user}],
+                    "contents": user,
+                    "generation_config": {
+                        "max_output_tokens": max_tokens,
+                        "temperature": temperature,
+                    },
                 }
-                if isinstance(system_payload, list):
-                    kwargs["system"] = system_payload
-                else:
-                    kwargs["system"] = system_payload
 
-                response = client.messages.create(**kwargs)
-                parts: list[str] = []
-                for block in response.content:
-                    text = getattr(block, "text", None)
-                    if text:
-                        parts.append(text)
-                return "\n".join(parts).strip()
+                response = genai_model.generate_content(**kwargs)
+                if response.text:
+                    return response.text.strip()
+                else:
+                    raise GoogleAIClientError("Empty response from Google AI Studio")
+                    
             except Exception as exc:
                 last_exc = exc
                 if attempt >= self.max_retries or not self._is_retryable(exc):
-                    raise AnthropicClientError(str(exc)) from exc
+                    raise GoogleAIClientError(str(exc)) from exc
                 delay = min(
                     self.max_delay_sec,
                     self.base_delay_sec * (2 ** (attempt - 1)),
                 )
                 delay *= 0.5 + random.random()  # jitter
                 logger.warning(
-                    "Anthropic call failed (attempt %d/%d): %s; sleep %.1fs",
+                    "Google AI Studio call failed (attempt %d/%d): %s; sleep %.1fs",
                     attempt,
                     self.max_retries,
                     exc,
@@ -157,7 +133,7 @@ class AnthropicClient:
                 )
                 time.sleep(delay)
 
-        raise AnthropicClientError(str(last_exc) if last_exc else "unknown error")
+        raise GoogleAIClientError(str(last_exc) if last_exc else "unknown error")
 
     @staticmethod
     def extract_json(text: str) -> Any:

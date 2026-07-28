@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.intelligence.anthropic_client import AnthropicClient
+from src.intelligence.google_ai_studio_client import GoogleAIClient
 from src.intelligence.maker import StrategyMaker
 from src.intelligence.params import (
     canonicalize_candidate,
@@ -16,12 +16,12 @@ from src.intelligence.persistence import StateStore
 from src.core.config import load_config
 
 
-def test_anthropic_key_shape_rejects_placeholder():
-    assert AnthropicClient.looks_like_api_key(None) is False
-    assert AnthropicClient.looks_like_api_key("") is False
-    assert AnthropicClient.looks_like_api_key("sk-ant-...") is False
-    assert AnthropicClient.looks_like_api_key("not-a-key") is False
-    assert AnthropicClient.looks_like_api_key("sk-ant-api03-abcdefghijklmnop") is True
+def test_google_ai_key_shape_rejects_placeholder():
+    assert GoogleAIClient.looks_like_api_key(None) is False
+    assert GoogleAIClient.looks_like_api_key("") is False
+    assert GoogleAIClient.looks_like_api_key("AIza...") is False
+    assert GoogleAIClient.looks_like_api_key("not-a-key") is False
+    assert GoogleAIClient.looks_like_api_key("AIzaSyabcdefghijklmnop123456789") is True
 
 
 def test_llm_specs_exclude_trading_profile():

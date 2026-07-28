@@ -276,6 +276,9 @@ loop_engineering:
   stop_on_all_strategies_gate_fail: true
 
 # Maker → Checker → Validator (Gemini).
+# Keys: GEMINI_API_KEY or GOOGLE_API_KEY.
+#   - AQ....  → Google Cloud Agent Platform express (vertexai=True)
+#   - AIza... → Gemini Developer API (AI Studio)
 # No / invalid API key → seed settings.yaml defaults (demo can run without LLM).
 intelligence:
   enabled: true

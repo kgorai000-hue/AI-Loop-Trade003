@@ -48,6 +48,9 @@ python main.py optimize --pairs
 
 Gemini API キーが無い／無効な場合は **settings.yaml のデフォルトを seed** してすぐ終わります（数分）。有効なキーがあるときだけ Maker→Checker→Validator→grid が走ります。
 
+- AI Studio キー（`AIza...`）: `GEMINI_API_KEY`
+- Cloud Agent Platform express（`AQ....`）: `GOOGLE_API_KEY` または `GEMINI_API_KEY`（自動で vertex モード）
+
 5. 常駐ループ（デモ実注文）:
 
 ```bash

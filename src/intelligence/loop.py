@@ -106,7 +106,7 @@ class IntelligenceLoop:
         # Demo path: no valid Gemini key → seed settings defaults (seconds, not hours).
         if not self.client.available() and self.no_api_seed_baseline:
             logger.info(
-                "No valid GEMINI_API_KEY — seeding config defaults for %s (%s)",
+                "No valid GEMINI_API_KEY/GOOGLE_API_KEY — seeding config defaults for %s (%s)",
                 self.symbol,
                 self.strategy,
             )

@@ -20,8 +20,15 @@ def test_google_ai_key_shape_rejects_placeholder():
     assert GoogleAIClient.looks_like_api_key(None) is False
     assert GoogleAIClient.looks_like_api_key("") is False
     assert GoogleAIClient.looks_like_api_key("AIza...") is False
+    assert GoogleAIClient.looks_like_api_key("AQ....") is False
     assert GoogleAIClient.looks_like_api_key("not-a-key") is False
     assert GoogleAIClient.looks_like_api_key("AIzaSyabcdefghijklmnop123456789") is True
+    assert GoogleAIClient.looks_like_api_key("AQ.Ab8Rabcdefghijklmnop1234567890") is True
+
+
+def test_google_ai_backend_detects_express_key():
+    assert GoogleAIClient.resolve_backend("AQ.Ab8Rabcdefghijklmnop1234567890") == "vertex"
+    assert GoogleAIClient.resolve_backend("AIzaSyabcdefghijklmnop123456789") == "ai_studio"
 
 
 def test_llm_specs_exclude_trading_profile():

@@ -1,4 +1,4 @@
-"""Google AI Studio (Gemini) API client with exponential backoff."""
+"""Google Gemini API client (AI Studio + Agent Platform express mode)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,15 @@ class GoogleAIClientError(RuntimeError):
 class GoogleAIClient:
     """
     Thin wrapper around the Google Gen AI SDK (`google-genai`).
-    API key: GEMINI_API_KEY environment variable only.
+
+    Env (first match wins):
+      - GEMINI_API_KEY
+      - GOOGLE_API_KEY
+
+    Backend selection:
+      - Keys starting with ``AQ.`` → Agent Platform express mode (``vertexai=True``)
+      - Otherwise → Gemini Developer API (AI Studio)
+      - Override with ``GEMINI_BACKEND=vertex|ai_studio``
     """
 
     def __init__(
@@ -32,10 +40,19 @@ class GoogleAIClient:
         self.base_delay_sec = float(base_delay_sec)
         self.max_delay_sec = float(max_delay_sec)
         self._client = None
+        self._backend: str | None = None
+
+    @staticmethod
+    def resolve_api_key() -> str | None:
+        for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+            raw = os.environ.get(name)
+            if raw and raw.strip():
+                return raw.strip()
+        return None
 
     @staticmethod
     def looks_like_api_key(api_key: str | None) -> bool:
-        """True only for a non-placeholder Google AI Studio key shape."""
+        """True for AI Studio (AIza...) or Agent Platform express (AQ....) keys."""
         key = (api_key or "").strip()
         if not key:
             return False
@@ -45,29 +62,56 @@ class GoogleAIClient:
             return False
         return True
 
+    @staticmethod
+    def resolve_backend(api_key: str) -> str:
+        """Return ``vertex`` (Agent Platform) or ``ai_studio`` (Developer API)."""
+        override = (os.environ.get("GEMINI_BACKEND") or "").strip().lower()
+        if override in {"vertex", "agent", "agent_platform", "express"}:
+            return "vertex"
+        if override in {"ai_studio", "gemini", "developer"}:
+            return "ai_studio"
+        if api_key.startswith("AQ."):
+            return "vertex"
+        return "ai_studio"
+
     def available(self) -> bool:
-        return self.looks_like_api_key(os.environ.get("GEMINI_API_KEY"))
+        return self.looks_like_api_key(self.resolve_api_key())
 
     def _get_client(self):
         if self._client is not None:
             return self._client
-        api_key = os.environ.get("GEMINI_API_KEY")
+        api_key = self.resolve_api_key()
         if not self.looks_like_api_key(api_key):
             raise GoogleAIClientError(
-                "GEMINI_API_KEY is missing or looks like a placeholder"
+                "GEMINI_API_KEY / GOOGLE_API_KEY is missing or looks like a placeholder"
             )
+        assert api_key is not None
         try:
             from google import genai
         except ImportError as exc:
             raise GoogleAIClientError(
                 "google-genai package not installed; pip install google-genai"
             ) from exc
-        self._client = genai.Client(api_key=api_key)
+
+        backend = self.resolve_backend(api_key)
+        self._backend = backend
+        if backend == "vertex":
+            # Agent Platform / Vertex express mode (keys like AQ....)
+            self._client = genai.Client(vertexai=True, api_key=api_key)
+            logger.info("GoogleAIClient using Agent Platform express mode (vertexai=True)")
+        else:
+            self._client = genai.Client(api_key=api_key)
+            logger.info("GoogleAIClient using Gemini Developer API (AI Studio)")
         return self._client
 
     def _is_retryable(self, exc: BaseException) -> bool:
-        name = type(exc).__name__.lower()
         msg = str(exc).lower()
+        # Billing / prepaid depletion will not recover with retries.
+        if "resource_exhausted" in msg and (
+            "prepayment" in msg or "credits are depleted" in msg or "billing" in msg
+        ):
+            return False
+        name = type(exc).__name__.lower()
         if "rate" in name or "rate_limit" in msg or "429" in msg:
             return True
         if "overloaded" in msg or "timeout" in msg or "timed out" in msg:
@@ -112,7 +156,7 @@ class GoogleAIClient:
                 text = getattr(response, "text", None)
                 if text:
                     return str(text).strip()
-                raise GoogleAIClientError("Empty response from Google AI Studio")
+                raise GoogleAIClientError("Empty response from Gemini API")
 
             except Exception as exc:
                 last_exc = exc
@@ -124,7 +168,7 @@ class GoogleAIClient:
                 )
                 delay *= 0.5 + random.random()  # jitter
                 logger.warning(
-                    "Google AI Studio call failed (attempt %d/%d): %s; sleep %.1fs",
+                    "Gemini API call failed (attempt %d/%d): %s; sleep %.1fs",
                     attempt,
                     self.max_retries,
                     exc,

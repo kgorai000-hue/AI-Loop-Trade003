@@ -7,7 +7,7 @@ from src.core.config import AppConfig
 from src.core.mt5_connector import MT5Connector
 from src.data.fetcher import FetchResult, SyncSummary
 from src.data.lineage import SyncRunStore
-from src.data.quality import check_data_quality, filter_valid_bars
+from src.data.quality import TIMEFRAME_SECONDS, check_data_quality, filter_valid_bars
 from src.data.robust_fetch import RobustOHLCVFetcher
 from src.data.store import BarRecord, OHLCVStore
 
@@ -117,28 +117,42 @@ class DataAgent:
 
         last_bar_time = self.store.get_last_bar_time(resolved, timeframe)
         if last_bar_time is not None:
-            # Resident polls often: tip from present + range catch-up from last bar.
-            # copy_rates_from(last_time, 50) alone can stall for weeks on a stale MAX(time).
+            # Tip from present first (avoids stale MAX stall). Range only when the tip
+            # window cannot cover the gap — copy_rates_range is flaky on FxPro demo.
             tip_count = 50 if stored_count >= history_bars else min(history_bars, 200)
             tip = self.fetcher.fetch_latest(symbol, timeframe, tip_count)
             if tip.bars:
                 fetched_batches.append((tip.bars, tip.mode, tip.attempts))
             tip_max = max((b.time for b in tip.bars), default=None)
-            stale = tip_max is not None and tip_max > last_bar_time
-            if stale or stored_count < history_bars:
-                incremental_count = (
-                    50 if stored_count >= history_bars else min(history_bars, 1000)
-                )
-                incremental = self.fetcher.fetch(
-                    symbol=symbol,
-                    timeframe=timeframe,
-                    count=incremental_count,
-                    last_bar_time=last_bar_time,
-                )
-                if incremental.bars:
-                    fetched_batches.append(
-                        (incremental.bars, incremental.mode, incremental.attempts)
+            gap_sec = (tip_max - last_bar_time) if tip_max is not None else 0
+            bar_sec = TIMEFRAME_SECONDS.get(timeframe.upper(), 1800)
+            tip_span = tip_count * bar_sec
+            need_range = stored_count < history_bars or gap_sec > tip_span
+            if need_range:
+                try:
+                    incremental_count = (
+                        50 if stored_count >= history_bars else min(history_bars, 1000)
                     )
+                    incremental = self.fetcher.fetch(
+                        symbol=symbol,
+                        timeframe=timeframe,
+                        count=incremental_count,
+                        last_bar_time=last_bar_time,
+                    )
+                    if incremental.bars:
+                        fetched_batches.append(
+                            (incremental.bars, incremental.mode, incremental.attempts)
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    if fetched_batches:
+                        logger.warning(
+                            "Range catch-up failed for %s %s (keeping tip): %s",
+                            resolved,
+                            timeframe,
+                            exc,
+                        )
+                    else:
+                        raise
             if tip_max is not None and tip_max > last_bar_time + 3600:
                 logger.warning(
                     "Catching up stale store %s %s: last=%s tip=%s (+%ss)",

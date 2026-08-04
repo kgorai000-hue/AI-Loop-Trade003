@@ -103,19 +103,32 @@ class RobustOHLCVFetcher:
                     return self.fetch_deep(symbol, timeframe, count)
 
                 resolved = self.connector.ensure_symbol(symbol)
-                # Prefer range from last bar → now so a stale MAX(time) cannot stall.
                 date_from = datetime.fromtimestamp(last_bar_time, tz=timezone.utc)
                 date_to = datetime.now(tz=timezone.utc) + timedelta(minutes=1)
-                rates = self.connector.get_rates_range(resolved, timeframe, date_from, date_to)
-                bars = rates_to_bars(resolved, timeframe, rates)
+                bars: list[BarRecord] = []
                 mode = "incremental"
 
+                # Range can throw Terminal: Call failed on FxPro; fail soft → tip/from.
+                try:
+                    rates = self.connector.get_rates_range(
+                        resolved, timeframe, date_from, date_to
+                    )
+                    bars = rates_to_bars(resolved, timeframe, rates)
+                except RuntimeError as range_exc:
+                    logger.warning(
+                        "copy_rates_range failed for %s %s (%s); falling back to tip/from",
+                        symbol,
+                        timeframe,
+                        range_exc,
+                    )
+
                 if not bars:
-                    # Fallback: tip from present (from_pos), then classic from-date.
                     tip = self.fetch_latest(symbol, timeframe, min(count, 200))
                     if tip.bars:
                         return tip
-                    rates = self.connector.get_rates_from(resolved, timeframe, date_from, count)
+                    rates = self.connector.get_rates_from(
+                        resolved, timeframe, date_from, count
+                    )
                     bars = rates_to_bars(resolved, timeframe, rates)
 
                 if not bars:
@@ -134,6 +147,10 @@ class RobustOHLCVFetcher:
                     timeframe,
                     exc,
                 )
+                # Avoid reconnect storms on Terminal: Call failed — tip/from may still work.
+                if "Terminal: Call failed" in str(exc) and attempt < cfg.max_retries - 1:
+                    time.sleep(min(wait, 1.0))
+                    continue
                 if attempt < cfg.max_retries - 1:
                     try:
                         self.connector.disconnect()

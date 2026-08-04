@@ -413,12 +413,14 @@ class ResidentLoopEngine:
         if not self.run_pipeline_on_bar:
             store.update_state(last_processed_bar=latest)
             result["skipped"] = "pipeline_disabled"
+            logger.info("%s bar=%s skipped=pipeline_disabled", symbol, latest)
             return result
 
         strategy = self._live_strategy_for_symbol(symbol)
         if strategy is None:
             store.update_state(last_processed_bar=latest)
             result["skipped"] = "regime_halt"
+            logger.info("%s bar=%s skipped=regime_halt", symbol, latest)
             return result
 
         strat_key = strategy_state_key(symbol, strategy)
@@ -429,6 +431,12 @@ class ResidentLoopEngine:
         ):
             store.update_state(last_processed_bar=latest)
             result["skipped"] = f"no_adopted_params:{strategy}"
+            logger.info(
+                "%s bar=%s skipped=no_adopted_params strategy=%s",
+                symbol,
+                latest,
+                strategy,
+            )
             return result
 
         try:
@@ -473,12 +481,20 @@ class ResidentLoopEngine:
         if self.sync_on_poll:
             try:
                 system = TradingSystem(self.config, self.connector, self.ohlcv)
-                # Sync full engineering universe so cross-group checks stay fresh.
+                # Poll sync: primary TF only (full multi-TF sync floods logs every 30s).
                 sync_symbols = list(
                     dict.fromkeys([*self.engineering_symbols, *self.trade_symbols])
                 )
-                synced = system.sync_data(sync_symbols)
-                logger.debug("Synced %s bars across %s symbols", synced, len(sync_symbols))
+                summary = system.data_agent.sync_all(
+                    symbols=sync_symbols,
+                    timeframes=[self.timeframe],
+                )
+                logger.debug(
+                    "Synced %s bars across %s symbols (%s only)",
+                    summary.total_stored,
+                    len(sync_symbols),
+                    self.timeframe,
+                )
             except Exception:
                 logger.exception("Sync failed during poll")
 
@@ -490,6 +506,29 @@ class ResidentLoopEngine:
                     events.append(event)
             except Exception:
                 logger.exception("poll error for %s", symbol)
+        if not events:
+            # Heartbeat so operators know the loop is alive between M30 closes.
+            sample = self.trade_symbols[0] if self.trade_symbols else None
+            latest = self._latest_bar_time(sample) if sample else None
+            last = None
+            if sample:
+                store = self.bar_stores.get(sample)
+                if store is None:
+                    from src.intelligence.params import symbol_to_state_key
+
+                    store = StateStore(
+                        self.state_dir, f"{symbol_to_state_key(sample)}__runtime"
+                    )
+                    self.bar_stores[sample] = store
+                last = store.read_state().get("last_processed_bar")
+            logger.info(
+                "poll idle: no new %s bars (%d symbols) sample=%s last=%s latest=%s",
+                self.timeframe,
+                len(self.trade_symbols),
+                sample,
+                last,
+                latest,
+            )
         return events
 
     def metrics_degraded(self, symbol: str, strategy: str) -> bool:

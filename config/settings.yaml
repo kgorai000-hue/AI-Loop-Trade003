@@ -302,6 +302,7 @@ intelligence:
     review_hour_utc: 6
     sharpe_degrade_trigger: 0.20
     run_pipeline_on_bar: true
+    # Sync only primary TF (M30) each poll; full multi-TF sync is for bootstrap/optimize.
     sync_on_poll: true
     pretrade_optimize: true
     require_adopted_params: true

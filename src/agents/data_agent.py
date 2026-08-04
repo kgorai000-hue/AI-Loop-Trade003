@@ -117,10 +117,12 @@ class DataAgent:
 
         last_bar_time = self.store.get_last_bar_time(resolved, timeframe)
         if last_bar_time is not None:
+            # Resident polls often: pull a short tail, not a full 1000-bar window.
+            incremental_count = 50 if stored_count >= history_bars else min(history_bars, 1000)
             incremental = self.fetcher.fetch(
                 symbol=symbol,
                 timeframe=timeframe,
-                count=min(history_bars, 1000),
+                count=incremental_count,
                 last_bar_time=last_bar_time,
             )
             if incremental.bars:

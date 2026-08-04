@@ -39,6 +39,51 @@ class RobustOHLCVFetcher:
         self.connector = connector
         self.fetch_cfg = fetch_cfg
 
+    def fetch_latest(
+        self,
+        symbol: str,
+        timeframe: str,
+        count: int,
+    ) -> RobustFetchResult:
+        """Fetch the newest bars from the present (copy_rates_from_pos)."""
+        cfg = self.fetch_cfg
+        last_error: Exception | None = None
+        count = max(int(count), 1)
+
+        for attempt in range(cfg.max_retries):
+            try:
+                if not self.connector.is_connected:
+                    self.connector.connect()
+
+                resolved = self.connector.ensure_symbol(symbol)
+                rates = self.connector.get_rates(resolved, timeframe, count)
+                bars = rates_to_bars(resolved, timeframe, rates)
+                if not bars:
+                    raise RuntimeError(f"Empty tip data for {symbol} {timeframe}")
+                return RobustFetchResult(bars=bars, mode="tip", attempts=attempt + 1)
+            except (ConnectionError, RuntimeError, ValueError) as exc:
+                last_error = exc
+                wait = cfg.backoff_base ** attempt
+                logger.warning(
+                    "Tip fetch attempt %d/%d failed for %s %s: %s",
+                    attempt + 1,
+                    cfg.max_retries,
+                    symbol,
+                    timeframe,
+                    exc,
+                )
+                if attempt < cfg.max_retries - 1:
+                    try:
+                        self.connector.disconnect()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    time.sleep(wait)
+                continue
+
+        raise RuntimeError(
+            f"Tip fetch failed after {cfg.max_retries} attempts for {symbol} {timeframe}: {last_error}"
+        )
+
     def fetch(
         self,
         symbol: str,
@@ -58,10 +103,20 @@ class RobustOHLCVFetcher:
                     return self.fetch_deep(symbol, timeframe, count)
 
                 resolved = self.connector.ensure_symbol(symbol)
+                # Prefer range from last bar → now so a stale MAX(time) cannot stall.
                 date_from = datetime.fromtimestamp(last_bar_time, tz=timezone.utc)
-                rates = self.connector.get_rates_from(resolved, timeframe, date_from, count)
+                date_to = datetime.now(tz=timezone.utc) + timedelta(minutes=1)
+                rates = self.connector.get_rates_range(resolved, timeframe, date_from, date_to)
                 bars = rates_to_bars(resolved, timeframe, rates)
                 mode = "incremental"
+
+                if not bars:
+                    # Fallback: tip from present (from_pos), then classic from-date.
+                    tip = self.fetch_latest(symbol, timeframe, min(count, 200))
+                    if tip.bars:
+                        return tip
+                    rates = self.connector.get_rates_from(resolved, timeframe, date_from, count)
+                    bars = rates_to_bars(resolved, timeframe, rates)
 
                 if not bars:
                     raise RuntimeError(f"Empty data for {symbol} {timeframe}")

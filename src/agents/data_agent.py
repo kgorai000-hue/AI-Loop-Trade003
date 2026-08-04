@@ -117,17 +117,36 @@ class DataAgent:
 
         last_bar_time = self.store.get_last_bar_time(resolved, timeframe)
         if last_bar_time is not None:
-            # Resident polls often: pull a short tail, not a full 1000-bar window.
-            incremental_count = 50 if stored_count >= history_bars else min(history_bars, 1000)
-            incremental = self.fetcher.fetch(
-                symbol=symbol,
-                timeframe=timeframe,
-                count=incremental_count,
-                last_bar_time=last_bar_time,
-            )
-            if incremental.bars:
-                fetched_batches.append(
-                    (incremental.bars, incremental.mode, incremental.attempts)
+            # Resident polls often: tip from present + range catch-up from last bar.
+            # copy_rates_from(last_time, 50) alone can stall for weeks on a stale MAX(time).
+            tip_count = 50 if stored_count >= history_bars else min(history_bars, 200)
+            tip = self.fetcher.fetch_latest(symbol, timeframe, tip_count)
+            if tip.bars:
+                fetched_batches.append((tip.bars, tip.mode, tip.attempts))
+            tip_max = max((b.time for b in tip.bars), default=None)
+            stale = tip_max is not None and tip_max > last_bar_time
+            if stale or stored_count < history_bars:
+                incremental_count = (
+                    50 if stored_count >= history_bars else min(history_bars, 1000)
+                )
+                incremental = self.fetcher.fetch(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    count=incremental_count,
+                    last_bar_time=last_bar_time,
+                )
+                if incremental.bars:
+                    fetched_batches.append(
+                        (incremental.bars, incremental.mode, incremental.attempts)
+                    )
+            if tip_max is not None and tip_max > last_bar_time + 3600:
+                logger.warning(
+                    "Catching up stale store %s %s: last=%s tip=%s (+%ss)",
+                    resolved,
+                    timeframe,
+                    last_bar_time,
+                    tip_max,
+                    tip_max - last_bar_time,
                 )
 
         if not fetched_batches:

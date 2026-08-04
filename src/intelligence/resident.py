@@ -379,10 +379,19 @@ class ResidentLoopEngine:
                 return False
 
     def _latest_bar_time(self, symbol: str) -> Optional[str]:
-        bars = self.ohlcv.get_recent_bars(symbol, self.timeframe, 1)
-        if not bars:
-            return None
-        return str(bars[-1].get("time") or "")
+        # Store keys use MT5-resolved names; try resolved first then raw config symbol.
+        candidates = [symbol]
+        try:
+            resolved = self.connector.ensure_symbol(symbol)
+            if resolved and resolved not in candidates:
+                candidates.insert(0, resolved)
+        except Exception:
+            pass
+        for name in candidates:
+            bars = self.ohlcv.get_recent_bars(name, self.timeframe, 1)
+            if bars:
+                return str(bars[-1].get("time") or "")
+        return None
 
     def _process_symbol_bar(self, symbol: str) -> dict[str, Any] | None:
         if self.require_adopted_params and not self._pretrade_ready:

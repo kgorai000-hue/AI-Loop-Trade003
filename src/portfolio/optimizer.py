@@ -139,6 +139,9 @@ class PortfolioOptimizer:
                     confidence=(signal.confidence or signal.strength) * strength_scale,
                     requested_lots=signal.requested_lots,
                     portfolio_weight=weight,
+                    group_id=signal.group_id,
+                    pair_id=signal.pair_id,
+                    trade_mode=signal.trade_mode,
                 )
             )
             allocations.append(

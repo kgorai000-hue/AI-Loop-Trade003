@@ -430,6 +430,107 @@ class ExecutionAgent:
         base = f"T3{mode}{group}"
         return base[:31]
 
+    def close_filled_plan(self, plan: ExecutionPlan, reason: str) -> ExecutionPlan:
+        """Close a filled (or dry-run simulated) position — used for pair orphan recovery."""
+        from src.core.types import SignalSide
+
+        if plan.filled_lots <= 0 and plan.lots <= 0:
+            plan.status = "close_skipped"
+            plan.reason = f"orphan close skipped (no fill); {reason}"
+            return plan
+
+        close_side = (
+            SignalSide.SELL if plan.side.value == "buy" else SignalSide.BUY
+        )
+        volume = float(plan.filled_lots or plan.lots)
+
+        if plan.dry_run or self.config.trading.dry_run:
+            plan.status = "orphan_closed"
+            plan.reason = f"[DRY RUN ORPHAN CLOSE] {close_side.value} {volume} | {reason}"
+            logger.warning("%s", plan.reason)
+            return plan
+
+        import MetaTrader5 as mt5
+
+        raw_account = mt5.account_info()
+        if raw_account is None or not self.connector.is_demo_account(raw_account):
+            plan.status = "close_failed"
+            plan.reason = f"orphan close blocked: not DEMO; {reason}"
+            logger.error("%s", plan.reason)
+            return plan
+
+        resolved = self.connector.ensure_symbol(plan.symbol)
+        positions = self.connector.positions_get(symbol=resolved) or ()
+        magic = int(self.config.mt5.magic)
+        target = None
+        for pos in positions:
+            if int(getattr(pos, "magic", -1)) != magic:
+                continue
+            if plan.ticket and int(getattr(pos, "ticket", 0)) == int(plan.ticket):
+                target = pos
+                break
+            if target is None:
+                target = pos
+        if target is None:
+            plan.status = "close_failed"
+            plan.reason = f"orphan close: no open position for {plan.symbol}; {reason}"
+            logger.error("%s", plan.reason)
+            return plan
+
+        tick = self.connector.symbol_info_tick(plan.symbol)
+        info = self.connector.symbol_info(plan.symbol)
+        if tick is None or info is None:
+            plan.status = "close_failed"
+            plan.reason = f"orphan close: missing tick for {plan.symbol}; {reason}"
+            logger.error("%s", plan.reason)
+            return plan
+
+        pos_type = int(getattr(target, "type", -1))
+        # POSITION_TYPE_BUY=0 → close with SELL
+        order_type = mt5.ORDER_TYPE_SELL if pos_type == 0 else mt5.ORDER_TYPE_BUY
+        price = float(tick.bid if pos_type == 0 else tick.ask)
+        close_volume = float(getattr(target, "volume", volume) or volume)
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": resolved,
+            "volume": close_volume,
+            "type": order_type,
+            "position": int(getattr(target, "ticket", 0)),
+            "price": price,
+            "deviation": int(self.config.mt5.deviation),
+            "magic": magic,
+            "comment": "T3orphanClose"[:31],
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": self._deal_filling_mode(info),
+        }
+        result = self.connector.order_send(request)
+        if result is None:
+            plan.status = "close_failed"
+            plan.reason = f"orphan close order_send None: {self.connector.last_error()}; {reason}"
+            logger.error("%s", plan.reason)
+            return plan
+        retcode = int(result.retcode)
+        ok = {
+            int(mt5.TRADE_RETCODE_DONE),
+            int(getattr(mt5, "TRADE_RETCODE_PLACED", 10008)),
+        }
+        if retcode not in ok:
+            plan.status = "close_failed"
+            plan.reason = (
+                f"orphan close rejected retcode={retcode} "
+                f"comment={getattr(result, 'comment', '')}; {reason}"
+            )
+            logger.error("%s", plan.reason)
+            return plan
+
+        plan.status = "orphan_closed"
+        plan.reason = (
+            f"[ORPHAN CLOSE] ticket={getattr(target, 'ticket', None)} "
+            f"close_deal={getattr(result, 'deal', None)} | {reason}"
+        )
+        logger.warning("%s", plan.reason)
+        return plan
+
     def summarize_telemetry(self, limit: int = 50):
         return self.telemetry.summarize(limit)
 

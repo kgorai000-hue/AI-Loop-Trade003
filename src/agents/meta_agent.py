@@ -64,6 +64,13 @@ from src.features.indicators import latest_atr_from_bars
 from src.trading_log.types import TradeLogSummary
 from src.survival.diagnostics import SurvivalDiagnostics
 from src.survival.types import SurvivalReport
+from src.agents.pair_execution import (
+    PAIR_ORPHAN_RETRIES,
+    PreparedLeg,
+    execute_pair_atomic,
+    partition_signals,
+)
+from dataclasses import replace as dc_replace
 
 logger = logging.getLogger(__name__)
 
@@ -331,110 +338,109 @@ class MetaAgent:
         result.decision_reports = decision_reports
         self.bus.publish(PipelineStage.DECISION.value, "DecisionAgent", decision_reports)
 
-        for signal in result.signals:
-            regime = regime_map.get(signal.symbol)
-            requested = (
-                signal.requested_lots
-                if signal.requested_lots is not None
-                else self.config.trading.default_lots
-            )
+        pair_groups, single_signals = partition_signals(result.signals)
 
-            risk = self._safe_call(
-                "RiskAgent",
-                lambda s=signal, r=regime, q=requested: self.risk_agent.review(s, q, r),
-                default=None,
+        for signal in single_signals:
+            prepared = self._prepare_executable_leg(
+                signal, regime_map, result, arbitration_notes
             )
-            if risk is None:
-                risk = RiskDecision(
-                    decision=RiskDecisionType.REJECT,
-                    approved_lots=0.0,
-                    reason="RiskAgent unavailable",
+            if prepared is None:
+                continue
+            self._execute_prepared_leg(prepared, result)
+
+        for pair_id, legs in pair_groups.items():
+            if len(legs) != 2:
+                logger.warning(
+                    "Pair gate %s: expected 2 legs, got %d — skip all",
+                    pair_id,
+                    len(legs),
                 )
-            result.risk_decisions.append(risk)
-
-            if self.ma.arbitration_mode == ArbitrationMode.VETO.value and risk.approved_lots <= 0:
-                logger.info("RiskAgent veto %s: %s", signal.symbol, risk.reason)
                 arbitration_notes.append(
                     ArbitrationResult(
-                        symbol=signal.symbol,
+                        symbol=pair_id,
                         approved=False,
                         net_score=-1,
                         votes=[],
-                        reason=f"risk veto: {risk.reason}",
+                        reason=f"pair gate: expected 2 legs, got {len(legs)}",
                     )
                 )
                 continue
 
-            if risk.approved_lots <= 0:
-                logger.info("RiskAgent rejected %s: %s", signal.symbol, risk.reason)
+            prepared_legs: list[PreparedLeg] = []
+            blocked_reason: str | None = None
+            for signal in legs:
+                prepared = self._prepare_executable_leg(
+                    signal, regime_map, result, arbitration_notes
+                )
+                if prepared is None:
+                    blocked_reason = f"leg {signal.symbol} failed risk/cost gate"
+                    break
+                prepared_legs.append(prepared)
+
+            if blocked_reason or len(prepared_legs) != 2:
+                logger.info(
+                    "Pair gate blocked %s — neither leg will execute (%s)",
+                    pair_id,
+                    blocked_reason or "incomplete prepare",
+                )
+                arbitration_notes.append(
+                    ArbitrationResult(
+                        symbol=pair_id,
+                        approved=False,
+                        net_score=-1,
+                        votes=[],
+                        reason=f"pair gate blocked: {blocked_reason or 'incomplete'}",
+                    )
+                )
                 continue
 
-            symbol_info = fetch_market_symbol_info(self.connector, self.config, signal.symbol)
-            bars = self.store.get_recent_bars(
-                signal.symbol,
-                self.config.stats.analysis_timeframe,
-                self.config.stats.min_bars,
+            logger.info(
+                "Pair gate passed %s — executing both legs atomically",
+                pair_id,
             )
-            closes = [float(b["close"]) for b in bars]
-            rets = log_returns(closes)
-            daily_vol = volatility(rets, annualize=False) if len(rets) else 0.02
 
-            atr = latest_atr_from_bars(bars, self.config.indicators.atr_period)
-
-            if self.config.costs.enabled:
-                tradability = self._safe_call(
-                    "CostEstimatorAgent",
-                    lambda s=signal, r=risk, si=symbol_info, dv=daily_vol: self.cost_estimator_agent.assess_trade(
-                        s, r.approved_lots, si, dv
-                    ),
-                    default=None,
-                )
-                if tradability is not None:
-                    if result.cost_report is None:
-                        result.cost_report = CostPipelineReport()
-                    result.cost_report.assessments.append(tradability)
-                    result.cost_report.total_estimated_cost_jpy += (
-                        tradability.notional * tradability.costs.total_pct / 100.0
+            def _exec_leg(leg: PreparedLeg) -> ExecutionPlan:
+                try:
+                    return self.execution_agent.execute(
+                        leg.plan,
+                        symbol_info=leg.symbol_info,
+                        daily_volatility=leg.daily_vol,
+                        signal=leg.signal,
+                        recent_bars=leg.bars,
+                        atr=leg.atr,
+                        trace_id=new_trace_id("ord"),
                     )
-                    if not tradability.tradable:
-                        result.cost_report.blocked_count += 1
-                        result.cost_report.warnings.extend(tradability.warnings)
-                        if self.config.costs.block_untradable:
-                            logger.info(
-                                "CostEstimator blocked %s: net alpha %.4f%%",
-                                signal.symbol,
-                                tradability.net_alpha_pct,
-                            )
-                            arbitration_notes.append(
-                                ArbitrationResult(
-                                    symbol=signal.symbol,
-                                    approved=False,
-                                    net_score=-1,
-                                    votes=[],
-                                    reason=f"untradable: net alpha {tradability.net_alpha_pct:.4f}%",
-                                )
-                            )
-                            continue
+                except ExecutionError as exc:
+                    logger.error(
+                        "ExecutionAgent failed for pair leg %s: %s",
+                        leg.signal.symbol,
+                        exc,
+                    )
+                    failed = leg.plan
+                    failed.status = "failed"
+                    failed.reason = f"exec error: {exc}; {failed.reason}"
+                    return failed
 
-            plan = self.execution_agent.plan(signal, risk, symbol_info, daily_vol)
-            try:
-                executed = self.execution_agent.execute(
-                    plan,
-                    symbol_info=symbol_info,
-                    daily_volatility=daily_vol,
-                    signal=signal,
-                    recent_bars=bars,
-                    atr=atr,
-                    trace_id=new_trace_id("ord"),
+            def _close_leg(plan: ExecutionPlan, reason: str) -> ExecutionPlan:
+                return self.execution_agent.close_filled_plan(
+                    dc_replace(plan), reason
                 )
-            except ExecutionError as exc:
-                logger.error("ExecutionAgent failed for %s: %s", signal.symbol, exc)
-                executed = plan
-            result.execution_plans.append(executed)
-            self.bus.publish(PipelineStage.EXECUTION.value, "ExecutionAgent", executed, MessagePattern.QUEUE)
 
-            monitor = self.monitor_agent.review(executed)
-            result.monitor_reports.append(monitor)
+            executed_plans = execute_pair_atomic(
+                prepared_legs,
+                execute_fn=_exec_leg,
+                close_fn=_close_leg,
+                orphan_retries=PAIR_ORPHAN_RETRIES,
+            )
+            for executed in executed_plans:
+                result.execution_plans.append(executed)
+                self.bus.publish(
+                    PipelineStage.EXECUTION.value,
+                    "ExecutionAgent",
+                    executed,
+                    MessagePattern.QUEUE,
+                )
+                result.monitor_reports.append(self.monitor_agent.review(executed))
 
         if self.config.execution.enabled and self.config.execution.log_executions:
             result.execution_report = self._safe_call(
@@ -502,6 +508,131 @@ class MetaAgent:
         )
 
         return result
+
+    def _prepare_executable_leg(
+        self,
+        signal: TradeSignal,
+        regime_map: dict[str, RegimeAssessment],
+        result: PipelineResult,
+        arbitration_notes: list[ArbitrationResult],
+    ) -> PreparedLeg | None:
+        """Risk + cost + plan. Returns None when the leg must not be sent."""
+        regime = regime_map.get(signal.symbol)
+        requested = (
+            signal.requested_lots
+            if signal.requested_lots is not None
+            else self.config.trading.default_lots
+        )
+
+        risk = self._safe_call(
+            "RiskAgent",
+            lambda s=signal, r=regime, q=requested: self.risk_agent.review(s, q, r),
+            default=None,
+        )
+        if risk is None:
+            risk = RiskDecision(
+                decision=RiskDecisionType.REJECT,
+                approved_lots=0.0,
+                reason="RiskAgent unavailable",
+            )
+        result.risk_decisions.append(risk)
+
+        if self.ma.arbitration_mode == ArbitrationMode.VETO.value and risk.approved_lots <= 0:
+            logger.info("RiskAgent veto %s: %s", signal.symbol, risk.reason)
+            arbitration_notes.append(
+                ArbitrationResult(
+                    symbol=signal.symbol,
+                    approved=False,
+                    net_score=-1,
+                    votes=[],
+                    reason=f"risk veto: {risk.reason}",
+                )
+            )
+            return None
+
+        if risk.approved_lots <= 0:
+            logger.info("RiskAgent rejected %s: %s", signal.symbol, risk.reason)
+            return None
+
+        symbol_info = fetch_market_symbol_info(self.connector, self.config, signal.symbol)
+        bars = self.store.get_recent_bars(
+            signal.symbol,
+            self.config.stats.analysis_timeframe,
+            self.config.stats.min_bars,
+        )
+        closes = [float(b["close"]) for b in bars]
+        rets = log_returns(closes)
+        daily_vol = volatility(rets, annualize=False) if len(rets) else 0.02
+        atr = latest_atr_from_bars(bars, self.config.indicators.atr_period)
+
+        if self.config.costs.enabled:
+            tradability = self._safe_call(
+                "CostEstimatorAgent",
+                lambda s=signal, r=risk, si=symbol_info, dv=daily_vol: self.cost_estimator_agent.assess_trade(
+                    s, r.approved_lots, si, dv
+                ),
+                default=None,
+            )
+            if tradability is not None:
+                if result.cost_report is None:
+                    result.cost_report = CostPipelineReport()
+                result.cost_report.assessments.append(tradability)
+                result.cost_report.total_estimated_cost_jpy += (
+                    tradability.notional * tradability.costs.total_pct / 100.0
+                )
+                if not tradability.tradable:
+                    result.cost_report.blocked_count += 1
+                    result.cost_report.warnings.extend(tradability.warnings)
+                    if self.config.costs.block_untradable:
+                        logger.info(
+                            "CostEstimator blocked %s: net alpha %.4f%%",
+                            signal.symbol,
+                            tradability.net_alpha_pct,
+                        )
+                        arbitration_notes.append(
+                            ArbitrationResult(
+                                symbol=signal.symbol,
+                                approved=False,
+                                net_score=-1,
+                                votes=[],
+                                reason=f"untradable: net alpha {tradability.net_alpha_pct:.4f}%",
+                            )
+                        )
+                        return None
+
+        plan = self.execution_agent.plan(signal, risk, symbol_info, daily_vol)
+        return PreparedLeg(
+            signal=signal,
+            risk=risk,
+            plan=plan,
+            symbol_info=symbol_info,
+            daily_vol=daily_vol,
+            bars=bars,
+            atr=atr,
+        )
+
+    def _execute_prepared_leg(self, prepared: PreparedLeg, result: PipelineResult) -> None:
+        try:
+            executed = self.execution_agent.execute(
+                prepared.plan,
+                symbol_info=prepared.symbol_info,
+                daily_volatility=prepared.daily_vol,
+                signal=prepared.signal,
+                recent_bars=prepared.bars,
+                atr=prepared.atr,
+                trace_id=new_trace_id("ord"),
+            )
+        except ExecutionError as exc:
+            logger.error("ExecutionAgent failed for %s: %s", prepared.signal.symbol, exc)
+            executed = prepared.plan
+        result.execution_plans.append(executed)
+        self.bus.publish(
+            PipelineStage.EXECUTION.value,
+            "ExecutionAgent",
+            executed,
+            MessagePattern.QUEUE,
+        )
+        result.monitor_reports.append(self.monitor_agent.review(executed))
 
     def _parallel_analysis(
         self,
